@@ -241,15 +241,22 @@
     ok(a.href.startsWith("https://wiki.melvoridle.com/"), a.href);
     eq(a.getAttribute("target"), "_blank");
   });
-  test(B, "the wiki link opens a new tab and never navigates the game", () => sandbox(() => {
+  test(B, "the wiki link opens a new tab and never navigates the game", () => sandbox(async () => {
     const it = list(game.items).find((i) => D().sourceHtml(i.id).includes("data-mbd-wiki"));
     if (!it) skip("no item without a source");
-    let args = null;
+    let args = null, navigated = false;
     stub(window, "open", (...a) => { args = a; return {}; });
     D().fire("t", () => D().sourceHtml(it.id), null);
+    ok(await waitFor(() => document.querySelector(".swal2-popup [data-mbd-wiki]"), 2000, 50), "link not in popup");
+    await sleep(100); // the popup attaches its click handler just after it opens
     const link = document.querySelector(".swal2-popup [data-mbd-wiki]");
-    ok(link, "link not in popup");
+    // runs after the popup's own handler: if the mod didn't take the click, stop the real navigation and report it
+    let intercepted = null;
+    const guard = (ev) => { intercepted = ev.defaultPrevented; if (!ev.defaultPrevented) ev.preventDefault(); };
+    window.addEventListener("click", guard, { once: true });
     link.click();
+    window.removeEventListener("click", guard);
+    ok(intercepted === true, "the click wasn't intercepted, so the link would have changed the game's own tab");
     ok(args, "window.open wasn't called");
     eq(args[1], "_blank");
     has(args[0], "wiki.melvoridle.com");
