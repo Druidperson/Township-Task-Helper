@@ -234,17 +234,33 @@ export function setup(ctx) {
     const slot = pl?.food?.slots?.[pl.food.selectedSlot];
     let heal = 0;
     try { if (slot?.item) heal = pl.getFoodHealing(slot.item); } catch (e) { /* ignore */ }
-    return { hp, heal, food: slot?.item && slot.quantity > 0 ? nm(slot.item) : null, foodQty: slot?.quantity ?? 0 };
+    let pool = 0;
+    for (const s of pl?.food?.slots ?? []) { try { if (s.item && s.quantity > 0) pool += s.quantity * pl.getFoodHealing(s.item); } catch (e) { /* ignore */ } }
+    return { hp, heal, food: slot?.item && slot.quantity > 0 ? nm(slot.item) : null, foodQty: slot?.quantity ?? 0, pool };
   };
-  // safe = two max hits never kill you, and you either barely get scratched or your food out-heals an average hit
-  const fightSafety = (m) => {
+  // rough damage you take killing this monster once (it respawns after a few seconds)
+  const damagePerKill = (m, avg) => {
+    try {
+      const st = game.combat.player.stats;
+      const mine = ((st.minHit + st.maxHit) / 2) * 0.75;
+      const mhp = (m.levels?.Hitpoints ?? 1) * nmult();
+      const killMs = Math.ceil(mhp / Math.max(1, mine)) * (st.attackInterval || 4000);
+      return avg * (killMs / (statVal(m, "attackSpeed") || 3000)) * 0.75;
+    } catch (e) { return null; }
+  };
+  // safe = two max hits never kill you, your food can out-heal it, and you carry enough food to finish the whole farm
+  const fightSafety = (m, kills = 1) => {
     const max = monsterMaxHit(m), g = playerGuard();
     if (max === null) return { safe: false, max, avg: null, g, why: "can't tell how hard it hits" };
     const avg = (1 + max) / 2;
     if (max * 2 >= g.hp) return { safe: false, max, avg, g, why: `can hit for ${num(max)} against your ${num(g.hp)} HP` };
-    if (max <= g.hp * 0.15) return { safe: true, max, avg, g, why: `hits for ${num(max)} at most against your ${num(g.hp)} HP` };
-    if (g.food && g.heal >= avg) return { safe: true, max, avg, g, why: `average hit ${num(Math.round(avg))}, your ${g.food} heals ${num(Math.round(g.heal))}` };
-    return { safe: false, max, avg, g, why: g.food ? `average hit ${num(Math.round(avg))} but your ${g.food} heals only ${num(Math.round(g.heal))}` : `average hit ${num(Math.round(avg))} and no food equipped` };
+    if (!g.food || !(g.pool > 0)) return { safe: false, max, avg, g, why: "you have no food equipped" };
+    if (g.heal < avg && max > g.hp * 0.15) return { safe: false, max, avg, g, why: `average hit ${num(Math.round(avg))} but your ${g.food} heals only ${num(Math.round(g.heal))}` };
+    const dpk = damagePerKill(m, avg);
+    const need = dpk === null ? null : Math.ceil((dpk * kills) / Math.max(1, g.heal));
+    const have = Math.floor(g.pool / Math.max(1, g.heal));
+    if (dpk !== null && dpk * kills > g.pool) return { safe: false, max, avg, g, need, have, why: `this farm needs about ${num(need)} food and you have ${num(have)} equipped` };
+    return { safe: true, max, avg, g, need, have, why: `hits for ${num(max)} at most against your ${num(g.hp)} HP, and your food lasts` };
   };
   const dropPerKill = (m, item) => {
     let p = 0;
@@ -257,7 +273,7 @@ export function setup(ctx) {
   const slayerTaskNow = () => {
     try { const t = game.combat?.slayerTask; return t?.active && t.monster && t.killsLeft > 0 ? t : null; } catch (e) { return null; }
   };
-  const farmFights = (item) => {
+  const farmFights = (item, qty = 1) => {
     buildIndex();
     const task = slayerTaskNow();
     const out = [];
@@ -267,14 +283,14 @@ export function setup(ctx) {
       if (!(perKill > 0)) continue;
       let open = true;
       try { open = !areaMissing(m).length; } catch (e) { /* ignore */ }
-      out.push({ type: "fight", m, id: "m:" + m.id, open, perKill, safety: fightSafety(m), onTask: !!task && task.monster === m, taskLeft: task && task.monster === m ? task.killsLeft : 0 });
+      out.push({ type: "fight", m, id: "m:" + m.id, open, perKill, safety: fightSafety(m, Math.ceil(qty / perKill)), onTask: !!task && task.monster === m, taskLeft: task && task.monster === m ? task.killsLeft : 0 });
     }
     return out.sort((a, b) => b.open - a.open || b.safety.safe - a.safety.safe || b.onTask - a.onTask || b.perKill - a.perKill);
   };
   // what "best" means for this item right now
-  const farmPlan = (item, ignorePick = false) => {
+  const farmPlan = (item, ignorePick = false, qty = 1) => {
     const pick = ignorePick ? "best" : farmPick(item);
-    const skills = farmSkills(item), fights = farmFights(item);
+    const skills = farmSkills(item), fights = farmFights(item, qty);
     if (pick.startsWith("s:")) { const o = skills.find((x) => x.id === pick && x.open); if (o) return { opt: o, auto: false }; }
     if (pick.startsWith("m:")) { const o = fights.find((x) => x.id === pick && x.open); if (o) return { opt: o, auto: false }; }
     const s = bestFarmSkill(item);
@@ -286,8 +302,8 @@ export function setup(ctx) {
     return risky ? { opt: risky, auto: true, risky: true } : { opt: null, auto: true };
   };
   const farmHtml = (item, qty) => {
-    const skills = farmSkills(item), fights = farmFights(item);
-    const plan = farmPlan(item), o = plan.opt, auto = farmPlan(item, true).opt;
+    const skills = farmSkills(item), fights = farmFights(item, qty);
+    const plan = farmPlan(item, false, qty), o = plan.opt, auto = farmPlan(item, true, qty).opt;
     if (!skills.length && !fights.length) return sourceHtml(item.id);
     const label = (x) => x.type === "skill"
       ? `${nm(x.skill)}: ${nm(x.a)} · ${num(Math.round(x.xpHr))} XP/h · about ${(x.perHr).toFixed(x.perHr < 10 ? 1 : 0)}/h${x.open ? "" : ` (needs level ${x.level})`}`
@@ -464,7 +480,7 @@ export function setup(ctx) {
         if (ch) return { ...base, kind: "gather", skillId: ASTRO_ID, actionId: ch.c.id, constellation: Astro.pick === "best" ? "best" : ch.c.id, label: `${nm(astroSkill())}: study ${nm(ch.c)} for ${nm(n.item)}` };
       }
       if (!g && isFarmItem(n.item)) {
-        const fp = farmPlan(n.item), o = fp.opt;
+        const fp = farmPlan(n.item, false, n.qty), o = fp.opt;
         if (o && o.type === "skill") return { ...base, kind: "gather", skillId: o.skill.id, actionId: o.a.id, farm: fp.auto ? "best" : "fixed", label: `${nm(o.skill)}: ${nm(o.a)} for ${nm(n.item)}` };
         if (o && o.type === "fight" && (o.safety.safe || Farm.risk[n.item.id])) return { ...base, kind: "combat", monsterId: o.m.id, untilItem: n.item.id, targetKills: Math.ceil(n.qty / o.perKill), label: `Fight ${nm(o.m)} for ${nm(n.item)}` };
       }

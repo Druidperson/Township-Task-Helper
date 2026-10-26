@@ -859,15 +859,36 @@
     const items = await farmAdd(nest(), () => pickFarm(o.id));
     eq(items[0].actionId, o.a.id); eq(items[0].farm, "fixed");
   }));
-  test(F, "safety follows the hit size, your HP and your food", () => sandbox(async () => {
-    const fights = D().farmFights(bones());
+  const withFood = (qty, heal) => {
+    const pl = game.combat.player;
+    const food = game.items.allObjects.find((i) => i.healsFor > 0);
+    ok(food, "no food item in the game");
+    stub(pl.food, "slots", [{ item: food, quantity: qty }]);
+    stub(pl.food, "selectedSlot", 0);
+    stub(pl, "getFoodHealing", () => heal);
+  };
+  test(F, "no equipped food means no fight is safe", () => sandbox(async () => {
+    withFood(0, 100);
+    const fights = D().farmFights(bones(), 10);
     ok(fights.length > 3, "bones should drop from many monsters");
-    for (const f of fights) {
-      const s = f.safety, hp = s.g.hp;
-      if (s.max === null) { eq(s.safe, false); continue; }
-      const expect = s.max * 2 < hp && (s.max <= hp * 0.15 || (!!s.g.food && s.g.heal >= (1 + s.max) / 2));
-      eq(s.safe, expect, nm(f.m));
-    }
+    ok(fights.every((f) => !f.safety.safe), "something was safe with no food");
+    has(fights[0].safety.why, "no food");
+  }));
+  test(F, "plenty of strong food makes a gentle fight safe", () => sandbox(async () => {
+    withFood(100000, 1000);
+    const fights = D().farmFights(bones(), 10);
+    const gentle = fights.filter((f) => f.safety.max !== null && f.safety.max * 2 < f.safety.g.hp);
+    ok(gentle.length > 0, "no gentle monster");
+    ok(gentle.every((f) => f.safety.safe), "a gentle fight with plenty of food should be safe");
+    for (const f of fights) if (f.safety.max !== null && f.safety.max * 2 >= f.safety.g.hp) eq(f.safety.safe, false, nm(f.m));
+  }));
+  test(F, "a farm bigger than your food supply is not safe", () => sandbox(async () => {
+    withFood(1, 1000);
+    const small = D().farmFights(bones(), 1).find((f) => f.safety.max !== null && f.safety.max * 2 < f.safety.g.hp && f.safety.g.pool > 0);
+    ok(small, "no gentle monster");
+    const big = D().farmFights(bones(), 5000000).find((f) => f.m === small.m);
+    eq(big.safety.safe, false);
+    has(big.safety.why, "food");
   }));
   test(F, "a fight that is not safe is not queued unless you tick the box", () => sandbox(async () => {
     const risky = D().farmFights(bones()).find((f) => f.open && !f.safety.safe);
@@ -887,6 +908,7 @@
     eq(items[0].kind, "combat"); eq(items[0].untilItem, "melvorD:Bones"); eq(items[0].monsterId, risky.m.id);
   }));
   test(F, "a safe fight queues without asking", () => sandbox(async () => {
+    withFood(100000, 1000);
     const safe = D().farmFights(bones()).find((f) => f.open && f.safety.safe);
     if (!safe) throw new Skip("no safe fight for this character");
     const items = await farmAdd(bones(), () => pickFarm(safe.id));
