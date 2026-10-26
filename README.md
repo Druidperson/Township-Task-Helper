@@ -20,6 +20,10 @@ No task needed. Pick a skill, then either name an item and an amount, or pick a 
 
 Stardust and Golden Stardust drop while you study a constellation in Astrology. When a task needs them, the plan takes you there and asks which constellation you want to study, since each one boosts different skills. Pick the one you care about, or let it use the best XP per hour and switch up as you level.
 
+## Drops, sorted out
+
+Some items only drop. Bird Nest comes from Woodcutting, Bones from monsters. When a task needs one, the plan picks the quickest way: a skill you can train while it drops, or a fight that's safe for your health and food. It checks your Slayer task too, and offers it when that monster drops what you need. You can always pick a different tree or monster yourself.
+
 ## Walk into fights ready
 
 Monster tasks show how the enemy attacks, what it's weak to and where to find it. You can check your food and swap equipment sets without closing the window.

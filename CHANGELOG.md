@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.13.0
+- New: items that only drop, like Bird Nest or Bones, now get a real plan instead of a "go get it yourself" step.
+- If a skill drops the item while you train it (Bird Nest from Woodcutting), the queue does that skill with the best XP per hour you can use, and moves up as you level.
+- If only monsters drop it, the queue fights the one with the best drop rate that is safe for you. Safe means two of its biggest hits can't kill you, and either it barely scratches you or your equipped food heals more than its average hit.
+- If every fight looks risky, the popup says why and asks you to tick a box before it queues the fight.
+- The popup has a picker, so you can choose a specific tree, or a specific monster, instead of the automatic pick.
+- If your active Slayer task is a monster that drops the item, it shows up in the list marked as your task, so the kills count twice.
+- A fight step for an item runs until the item is in your bank, not for a fixed number of kills.
+
 ## 0.12.0
 - New: Stardust and Golden Stardust tasks now send you to Astrology, where they drop while you study a constellation. Before, they only showed a wiki link.
 - Astrology also levels other skills, so the popup asks which constellation to study. Pick one on purpose, or leave it on Best XP/hour. Each option shows the skills it boosts and its XP per hour.
