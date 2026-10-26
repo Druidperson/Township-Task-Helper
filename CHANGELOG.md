@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.5
+- The automatic fight for dropped items is now the most efficient safe one, not just the one with the best drop rate. It weighs how long you take to kill the monster, how many kills the farm needs, and how much of your food it burns. A Slayer task monster gets a bonus because those kills count twice.
+- Each fight in the picker shows about how long the farm takes, and the chosen fight shows kills, time and food.
+
 ## 0.13.4
 - Fixed: the fight list showed "UNDEFINED TRANSLATION" twice, for the placeholder monsters in Into the Mist and the Lair of the Spider Queen. They stand in for random monsters and have no real stats, so they can't be judged safe or risky, and they are no longer offered. Anywhere else a nameless monster shows, it reads "Random monster in <area>".
 

@@ -1047,6 +1047,34 @@
     ok(fights.every((f) => !odd.includes(f.m)), "a placeholder slot was offered");
     ok(!/undefined translation/i.test(D().farmHtml(bones(), 5)), "the placeholder name leaked into the picker");
   }));
+  test(F, "the automatic fight is the most efficient safe one", () => sandbox(async () => {
+    withFood(100000, 1000);
+    const fights = D().farmFights(bones(), 50);
+    const safe = fights.filter((f) => f.open && f.safety.safe);
+    ok(safe.length > 1, "need more than one safe fight to compare");
+    ok(safe.every((f) => isFinite(f.ms) && f.ms > 0), "every fight should have a time estimate");
+    const best = Math.min(...safe.map((f) => f.score));
+    const plan = D().farmPlan(bones(), true, 50);
+    eq(plan.opt.type, "fight");
+    eq(plan.opt.score, best);
+  }));
+  test(F, "slower kills and more food make a fight score worse", () => sandbox(async () => {
+    withFood(100000, 1000);
+    const f = D().farmFights(bones(), 50).find((x) => x.open && x.safety.safe);
+    ok(f, "no safe fight");
+    const bigger = D().farmFights(bones(), 500).find((x) => x.m === f.m);
+    ok(bigger.ms > f.ms, "ten times the farm should take longer");
+    ok(bigger.score > f.score, "and score worse");
+  }));
+  test(F, "the fight picker shows how long each fight takes", () => sandbox(async () => {
+    withFood(100000, 1000);
+    TH().showItem("melvorD:Bones", (game.bank.getQty(bones()) ?? 0) + 20);
+    ok(await popupReady(), "popup never finished opening");
+    const txt = document.querySelector("[data-mbd-farm]").textContent;
+    has(txt, "about ");
+    ok(!/Infinity|NaN/.test(document.querySelector(".mbd-th-pop").textContent), "bad number in the popup");
+  }));
+
   // =====================================================================================
   const run = async (opts = {}) => {
     const { live = true, group = null, only = null } = opts;

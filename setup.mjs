@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.13.4";
+  const VERSION = "0.13.5";
   const LOG = (...a) => console.log("[Township Task Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => {
@@ -252,14 +252,19 @@ export function setup(ctx) {
     return { hp, heal, food: slot?.item && slot.quantity > 0 ? nm(slot.item) : null, foodQty: slot?.quantity ?? 0, auto: threshold > 0, threshold, eff, effHeal: eff ? Math.floor((heal * eff) / 100) : 0, pool, swap };
   };
   // rough damage you take killing this monster once (it respawns after a few seconds)
-  const damagePerKill = (m, avg) => {
+  const RESPAWN_MS = 3000; // the pause before the next monster appears
+  // how long you take to kill it once (you land about 75% of your hits)
+  const killTimeMs = (m) => {
     try {
       const st = game.combat.player.stats;
       const mine = ((st.minHit + st.maxHit) / 2) * 0.75;
       const mhp = (m.levels?.Hitpoints ?? 1) * nmult();
-      const killMs = Math.ceil(mhp / Math.max(1, mine)) * (st.attackInterval || 4000);
-      return avg * (killMs / (statVal(m, "attackSpeed") || 3000)) * 0.75;
+      return Math.ceil(mhp / Math.max(1, mine)) * (st.attackInterval || 4000);
     } catch (e) { return null; }
+  };
+  const damagePerKill = (m, avg) => {
+    const killMs = killTimeMs(m);
+    return killMs === null ? null : avg * (killMs / (statVal(m, "attackSpeed") || 3000)) * 0.75;
   };
   // safe = auto eat is on and starts early enough to survive its biggest hit, and your food covers the whole farm
   const fightSafety = (m, kills = 1) => {
@@ -301,9 +306,14 @@ export function setup(ctx) {
       if (!(perKill > 0)) continue;
       let open = true;
       try { open = !areaMissing(m).length; } catch (e) { /* ignore */ }
-      out.push({ type: "fight", m, id: "m:" + m.id, open, perKill, safety: fightSafety(m, Math.ceil(qty / perKill)), onTask: !!task && task.monster === m, taskLeft: task && task.monster === m ? task.killsLeft : 0 });
+      const kills = Math.ceil(qty / perKill), safety = fightSafety(m, kills), km = killTimeMs(m);
+      const ms = km === null ? Infinity : kills * (km + RESPAWN_MS);
+      // efficiency: time to finish, made worse the more of your food it burns; a Slayer task you needed anyway counts for a lot
+      const foodShare = safety.need != null && safety.have > 0 ? Math.min(1, safety.need / safety.have) : 1;
+      const onTask = !!task && task.monster === m;
+      out.push({ type: "fight", m, id: "m:" + m.id, open, perKill, kills, ms, food: safety.need ?? null, safety, onTask, taskLeft: onTask ? task.killsLeft : 0, score: ms * (1 + 0.5 * foodShare) * (onTask ? 0.75 : 1) });
     }
-    return out.sort((a, b) => b.open - a.open || b.safety.safe - a.safety.safe || b.onTask - a.onTask || b.perKill - a.perKill);
+    return out.sort((a, b) => b.open - a.open || b.safety.safe - a.safety.safe || a.score - b.score);
   };
   // what "best" means for this item right now
   const farmPlan = (item, ignorePick = false, qty = 1) => {
@@ -314,9 +324,9 @@ export function setup(ctx) {
     const s = bestFarmSkill(item);
     if (s) return { opt: s, auto: true };
     const okFights = fights.filter((f) => f.open);
-    const safe = okFights.filter((f) => f.safety.safe).sort((a, b) => b.onTask - a.onTask || b.perKill - a.perKill)[0];
+    const safe = okFights.filter((f) => f.safety.safe).sort((a, b) => a.score - b.score)[0];
     if (safe) return { opt: safe, auto: true };
-    const risky = okFights.sort((a, b) => b.perKill - a.perKill)[0];
+    const risky = okFights.sort((a, b) => a.score - b.score)[0];
     return risky ? { opt: risky, auto: true, risky: true } : { opt: null, auto: true };
   };
   const farmHtml = (item, qty) => {
@@ -325,9 +335,9 @@ export function setup(ctx) {
     if (!skills.length && !fights.length) return sourceHtml(item.id);
     const label = (x) => x.type === "skill"
       ? `${nm(x.skill)}: ${nm(x.a)} · ${num(Math.round(x.xpHr))} XP/h · about ${(x.perHr).toFixed(x.perHr < 10 ? 1 : 0)}/h${x.open ? "" : ` (needs level ${x.level})`}`
-      : `Fight ${nm(x.m)} (Combat Lv ${num(x.m.combatLevel ?? 0)}) · ${x.perKill >= 1 ? "drops every kill" : `about 1 in ${num(Math.round(1 / x.perKill))} kills`} · ${x.safety.safe ? "safe" : "risky"}${x.onTask ? " · your Slayer task" : ""}${x.open ? "" : " (area locked)"}`;
+      : `Fight ${nm(x.m)} (Combat Lv ${num(x.m.combatLevel ?? 0)}) · ${x.perKill >= 1 ? "drops every kill" : `about 1 in ${num(Math.round(1 / x.perKill))} kills`} · ${isFinite(x.ms) ? "about " + fmtDur(x.ms) : "time unknown"} · ${x.safety.safe ? "safe" : "risky"}${x.onTask ? " · your Slayer task" : ""}${x.open ? "" : " (area locked)"}`;
     const cur = farmPick(item);
-    const autoTxt = !auto ? "nothing you can do yet" : auto.type === "skill" ? `${nm(auto.skill)}, ${nm(auto.a)} (best XP/hour)` : `fight ${nm(auto.m)}${auto.safety.safe ? " (safe for you)" : " (risky)"}`;
+    const autoTxt = !auto ? "nothing you can do yet" : auto.type === "skill" ? `${nm(auto.skill)}, ${nm(auto.a)} (best XP/hour)` : `fight ${nm(auto.m)}${auto.safety.safe ? " (most efficient safe fight)" : " (risky)"}`;
     const sel = `<select data-mbd-farm="${esc(item.id)}" class="custom-select custom-select-sm" style="max-width:100%;width:auto">` +
       `<option value="best"${cur === "best" ? " selected" : ""}>Automatic: ${esc(autoTxt)}</option>` +
       (skills.length ? `<optgroup label="Skilling">${skills.map((x) => `<option value="${esc(x.id)}"${cur === x.id ? " selected" : ""}${x.open ? "" : " disabled"}>${esc(label(x))}</option>`).join("")}</optgroup>` : "") +
@@ -339,7 +349,7 @@ export function setup(ctx) {
         `<div class="mbd-note">You train ${esc(nm(o.skill))} while it drops. ${plan.auto ? "The queue moves to a better method when you level up." : ""}</div>`;
     } else if (o) {
       const kills = Math.ceil(qty / o.perKill);
-      html += `<div class="mbd-chips">${chip(`${esc(nm(o.m))}`)}${chip(`Combat Lv ${num(o.m.combatLevel ?? 0)}`)}${chip(`About ${num(kills)} kills`, "ok", "Average drop rate")}${chip(o.safety.safe ? "Safe for you" : "Risky for you", o.safety.safe ? "ok" : "warn", esc(o.safety.why))}</div>` +
+      html += `<div class="mbd-chips">${chip(`${esc(nm(o.m))}`)}${chip(`Combat Lv ${num(o.m.combatLevel ?? 0)}`)}${chip(`About ${num(kills)} kills`, "ok", "Average drop rate")}${isFinite(o.ms) ? chip(`About ${fmtDur(o.ms)}`, "ok", "Kill time plus the pause between monsters, using your damage and an average drop rate") : ""}${o.food != null ? chip(`About ${num(o.food)} food`, "", "Food auto eat is expected to use") : ""}${chip(o.safety.safe ? "Safe for you" : "Risky for you", o.safety.safe ? "ok" : "warn", esc(o.safety.why))}</div>` +
         `<div class="mbd-note">${esc(cap(o.safety.why))}.${o.safety.safe ? "" : " Special attacks can hit harder than this."}</div>`;
       if (o.onTask) html += `<div class="mbd-chips">${chip(`<i class="fa fa-skull"></i> Your Slayer task: ${num(o.taskLeft)} left`, "ok", "These kills count toward it")}</div>`;
       if (!o.safety.safe) html += `<label class="mbd-note" style="display:block"><input type="checkbox" data-mbd-risk="${esc(item.id)}"${Farm.risk[item.id] ? " checked" : ""}> I understand the risk, queue this fight anyway</label>`;
