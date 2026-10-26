@@ -1000,7 +1000,7 @@ export function setup(ctx) {
     const ms = intervalMs(skill, a);
     if (e.kind === "gather") return ms / Math.max(1, a.baseQuantity ?? 1);
     const opt = options(a)[e.altIndex ?? 0];
-    return ms / Math.max(1, (a.baseQuantity ?? 1) * (opt?.mult ?? 1) * succ(skill, a));
+    return ms / (Math.max(1, (a.baseQuantity ?? 1) * (opt?.mult ?? 1)) * succ(skill, a));
   };
   const remainingUnits = (e) => (e.kind === "combat" ? Math.max(0, e.targetKills - Runner.gained(e)) : (e.kind === "xp" || e.kind === "train") ? Math.max(0, e.targetXp - (skillById(e.skillId)?.xp ?? 0)) : Math.max(0, e.qty - Runner.gained(e)));
   const estimateMs = (e) => {

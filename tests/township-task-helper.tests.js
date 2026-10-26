@@ -1114,6 +1114,7 @@
     burnAt(50);
     const half = D().xpCandidates(sk, true).find((c) => c.a === a)?.rate;
     ok(full > 0 && Math.abs(half - full / 2) < 1, `expected half the XP/hour, got ${half} vs ${full}`);
+    bankStub(() => 0);
     const e = { kind: "craft", skillId: sk.id, actionId: a.id, itemId: "melvorD:Shrimp", qty: 10, startQty: 0, altIndex: 0 };
     const slow = D().estimateMs(e);
     burnAt(100);
