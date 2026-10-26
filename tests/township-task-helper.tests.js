@@ -51,7 +51,7 @@
   // closing animates, and a half-closed popup would answer the next test's lookups
   const closePopups = async () => {
     try { Swal.close(); } catch (e) { /* none open */ }
-    await waitFor(() => !document.querySelector(".swal2-container"), 3000, 50);
+    await waitFor(() => !document.querySelector(".swal2-container"), 800, 25);
     document.querySelectorAll(".swal2-container").forEach((x) => x.remove());
   };
   const sandbox = async (fn) => {
@@ -660,12 +660,15 @@
   }));
 
   const U = "Train popup";
-  const open = async (skillName, goal) => {
-    D().TS.skillId = "melvorD:" + skillName; D().TS.goal = goal ?? "level"; D().TS.make = null; D().TS.level = null; D().TS.forced = "";
+  const setv = (id, v, type = "change") => { const e = document.getElementById(id); if (e.type === "checkbox") e.checked = v; else e.value = v; e.dispatchEvent(new Event(type, { bubbles: true })); };
+  // opens the popup the way a player does (it starts on the skill page you're on), then picks the skill and goal
+  const open = async (skillName, goal = "level") => {
+    D().TS.goal = "level";
     D().openTrain();
     ok(await popupReady(), "popup never finished opening");
+    if (document.getElementById("mbd-tr-skill").value !== "melvorD:" + skillName) setv("mbd-tr-skill", "melvorD:" + skillName);
+    if (goal !== "level") setv("mbd-tr-goal", goal);
   };
-  const setv = (id, v, type = "change") => { const e = document.getElementById(id); if (e.type === "checkbox") e.checked = v; else e.value = v; e.dispatchEvent(new Event(type, { bubbles: true })); };
   test(U, "opens from the minibar button with a skill list and a live preview", () => sandbox(async () => {
     document.getElementById("mbd-train-btn").click();
     await sleep(100);
