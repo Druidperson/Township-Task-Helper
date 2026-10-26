@@ -59,9 +59,10 @@
     th.runner.stop();
     await closePopups();
     const saved = JSON.stringify(th.queue.items);
-    const sAuto = th.settings.autoStart(), sSell = th.settings.autoSell();
+    const sAuto = th.settings.autoStart(), sSell = th.settings.autoSell(), sMast = th.settings.preferMastery();
     th.settings.setAutoStart(false);
     th.settings.set("autoSell", true);
+    th.settings.set("preferMastery", false);
     th.queue.items = [];
     notes.length = 0;
     stubs = [];
@@ -75,6 +76,7 @@
       th.queue.save();
       th.settings.setAutoStart(sAuto);
       th.settings.set("autoSell", sSell);
+      th.settings.set("preferMastery", sMast);
       th.panel.close();
     }
   };
@@ -1120,6 +1122,57 @@
     const slow = D().estimateMs(e);
     burnAt(100);
     ok(slow > D().estimateMs(e) * 1.9, "burning half should roughly double the time");
+  }));
+
+  const LA = "Lookahead and mastery";
+  test(LA, "when a better method is held back by another skill's level, it trains that skill first", () => sandbox(async () => {
+    const sm = skill("Smithing"), mi = skill("Mining");
+    if (sm.level < 10) skip("Smithing is below 10, so iron isn't open");
+    stub(mi, "level", 1); // only copper and tin can be mined, iron needs more
+    const to = Math.min(99, sm.level + 15);
+    const dt = D().bestDetour(sm, to);
+    ok(dt, "no detour found with Mining at 1");
+    eq(dt.skill.id, mi.id);
+    ok(dt.level > 1 && dt.saveMs > 0, "the detour should save time");
+    ok(dt.T1 < dt.T0, "total with the detour should be shorter");
+  }));
+  test(LA, "the train step adds the other skill's training above itself", () => sandbox(async () => {
+    const sm = skill("Smithing"), mi = skill("Mining");
+    if (sm.level < 10) skip("Smithing is below 10, so iron isn't open");
+    stub(mi, "level", 1);
+    const to = Math.min(99, sm.level + 15);
+    const nb = D().nextBatch({ id: "tt", skillId: sm.id, targetLevel: to, targetXp: exp.level_to_xp(to) });
+    ok(nb.ok && nb.detour, "expected a detour batch");
+    eq(nb.entries.length, 1);
+    eq(nb.entries[0].kind, "train"); eq(nb.entries[0].skillId, mi.id); eq(nb.entries[0].noDetour, true); eq(nb.entries[0].parent, "tt");
+  }));
+  test(LA, "no detour is suggested when nothing is held back", () => sandbox(async () => {
+    const wc = skill("Woodcutting");
+    eq(D().bestDetour(wc, Math.min(99, wc.level + 20)), null);
+  }));
+  test(LA, "Prefer mastery XP adds mastery XP to the ranking and is off by default", () => sandbox(async () => {
+    const sm = skill("Smithing");
+    eq(TH().settings.preferMastery(), false);
+    const off = D().trainCands(sm);
+    ok(off.length > 0, "no methods");
+    ok(off.every((c) => c.mast === 0 && c.score === c.rate), "off should rank by skill XP only");
+    TH().settings.set("preferMastery", true);
+    const on = D().trainCands(sm);
+    ok(on.some((c) => c.mast > 0), "no method gave mastery XP");
+    ok(on.every((c) => c.score >= c.rate), "mastery XP can only add to the score");
+    ok(on.every((c, i) => i === 0 || on[i - 1].score >= c.score), "sorted by score");
+  }));
+  test(LA, "the train popup has the mastery switch and it changes the setting", () => sandbox(async () => {
+    D().TS.goal = "level";
+    D().openTrain();
+    ok(await popupReady(), "popup never finished opening");
+    if (document.getElementById("mbd-tr-skill").value !== "melvorD:Woodcutting") setv("mbd-tr-skill", "melvorD:Woodcutting");
+    const cb = document.getElementById("mbd-tr-mastery");
+    ok(cb, "mastery switch missing");
+    eq(cb.checked, false);
+    cb.checked = true;
+    cb.dispatchEvent(new Event("change", { bubbles: true }));
+    eq(TH().settings.preferMastery(), true);
   }));
 
   // =====================================================================================

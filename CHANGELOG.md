@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.0
+- New: the training planner looks ahead across skills. If a better method is held back by another skill's level (iron bars need Mining 15, steel needs coal), it works out whether training that skill first gets you to the target sooner, and if it does, it adds that training as the first step. It only does this when the total time is at least 10% shorter, and the popup shows what it will do and how much it saves.
+- New: "Prefer mastery XP" in the mod settings and in the Train a skill popup. When on, the planner counts the mastery XP a method gives next to the skill XP, and sticks with a method longer (it needs to be 25% better to switch instead of 10%) so its mastery keeps growing. Off by default.
+
 ## 0.13.6
 - Cooking plans now count burnt food. A cook only gives food and XP when it works, so at a 77% success rate the queue gathers about a third more raw food, the time estimate is longer, and cooking methods are ranked by the XP per hour they really give. This covers Township tasks, XP tasks, the train planner and the restock step, so the queue runs out of materials far less often.
 
