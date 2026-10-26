@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.13.0";
+  const VERSION = "0.13.1";
   const LOG = (...a) => console.log("[Township Task Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => String(o?.name ?? o?._name ?? o?._localID ?? o?.id ?? "?");
@@ -907,7 +907,15 @@ export function setup(ctx) {
     html += `<div class="mbd-step"><div class="mbd-stepno">Fastest method right now</div>` +
       `<div class="mbd-title">${icon(best.a.product ?? best.a.log)}<b>${esc(nm(best.a))}</b></div>` +
       `<div class="mbd-chips">${chip(`Level ${best.a.level ?? 1}`)}${chip(`${num(Math.round(best.rate))} XP/hour`)}${chip(`About ${fmtTime(left / best.rate)}`, "ok", "Base XP only, ignoring mastery and other bonuses")}</div>` +
-      (!ready.length ? `<div class="mbd-chips">${chip("You don't have the materials for this in your bank yet. You do have the levels to get them.", "warn")}</div>` : "") + `</div>`;
+      `</div>`;
+    if (!ready.length) {
+      const mb = xpMaterialBatch({ id: "preview", skillId: skill.id, targetXp: target });
+      if (mb.ok) {
+        const steps = mb.entries.filter((x) => x.kind !== "manual").map((x) => chip(`${esc(x.label)} &times;${num(x.qty)}`)).join("");
+        html += `<div class="mbd-step"><div class="mbd-stepno">First, get the materials</div><div class="mbd-chips">${steps}</div>` +
+          `<div class="mbd-note">${esc(mb.note ?? "")}. You don't have them in your bank, so the queue gathers and makes them first, then trains.</div></div>`;
+      } else html += `<div class="mbd-chips">${chip(esc(mb.reason), "warn")}</div>`;
+    }
     if (all.length > 1) {
       html += `<div class="mbd-sec">Next best</div><div class="mbd-chips">` + all.slice(1, 4).map((c) => chip(`${esc(nm(c.a))} &middot; ${num(Math.round(c.rate))}/h`)).join("") + `</div>`;
     }
@@ -921,7 +929,7 @@ export function setup(ctx) {
     const cands = xpCandidates(skill);
     if (!cands.length) {
       const hint = xpCandidates(skill, true)[0];
-      return { ok: false, reason: hint ? `no materials for ${nm(hint.a)} or anything else you can train. Get some, then press Start` : `nothing to train at ${nm(skill)} level ${skill.level}` };
+      return { ok: false, noMaterials: !!hint, reason: hint ? `no materials for ${nm(hint.a)} or anything else you can train. Get some, then press Start` : `nothing to train at ${nm(skill)} level ${skill.level}` };
     }
     let lastReason = "the game wouldn't start it";
     for (const c of cands.slice(0, 15)) {
@@ -1170,6 +1178,17 @@ export function setup(ctx) {
           const rx = startEntry(cur);
           if (rx.ok) { Panel.render(); return; }
           if (rx.transient) { this.message = rx.reason; Panel.render(); return; }
+          if (rx.noMaterials) {
+            const xpNow = Math.floor(sk?.xp ?? 0);
+            if (cur.matXp !== undefined && xpNow <= cur.matXp) cur.matStall = (cur.matStall ?? 0) + 1; else cur.matStall = 0;
+            cur.matXp = xpNow;
+            if (cur.matStall >= 2) { this.block(cur, "getting the materials didn't lead to any XP, so the plan stopped. Check the steps above it"); return; }
+            const mb = xpMaterialBatch(cur);
+            if (!mb.ok) { this.block(cur, mb.reason); return; }
+            if (mb.trainable) { cur.now = mb.note; cur.afterLevel = mb.to; }
+            Queue.insertBefore(cur.id, mb.entries);
+            continue;
+          }
           this.block(cur, `${rx.reason} (${this.gained(cur).toLocaleString()} of ${Number(cur.targetXp).toLocaleString()} XP)`);
           return;
         }
@@ -1199,7 +1218,7 @@ export function setup(ctx) {
 
         if (cur.untilLevel) {
           const us = skillById(cur.untilSkill ?? cur.skillId);
-          if (us && us.level >= cur.untilLevel) { this.finish(cur); continue; }
+          if (us && (us.level >= cur.untilLevel || (cur.untilXp && (us.xp ?? 0) >= cur.untilXp))) { this.finish(cur); continue; }
         }
         if (owned - (cur.startQty ?? 0) >= cur.qty) { this.finish(cur); continue; }
 
@@ -1233,6 +1252,31 @@ export function setup(ctx) {
     },
   };
 
+  // XP goal with no materials in the bank: work out the steps that get them (mine the ore, chop the logs, craft the parts)
+  const levelForXp = (xp, cap = 120) => { let l = 1; while (l < cap && xpAt(l) < xp) l++; return l; };
+  const xpMaterialBatch = (e) => {
+    const skill = skillById(e.skillId);
+    if (!skill) return { ok: false, reason: "this skill wasn't found in your game version" };
+    if (isTrainable(skill)) {
+      const r = nextBatch({ id: e.id, skillId: skill.id, targetLevel: levelForXp(e.targetXp, levelCapFor(skill)), targetXp: e.targetXp, forced: "" });
+      return r.ok ? { ...r, trainable: true } : r;
+    }
+    const best = xpCandidates(skill, true)[0];
+    if (!best) return { ok: false, reason: `nothing to train at ${nm(skill)} level ${skill.level}` };
+    const a = best.a;
+    const per = (a.log ? [{ item: a.log, quantity: 1 }] : [...baseCosts(a), ...(options(a)[best.altIndex]?.costs ?? [])]).filter((k) => k?.item);
+    const goal = Math.min(e.targetXp, xpAt(Math.min(skill.level + 5, levelCapFor(skill))));
+    const actions = Math.max(1, Math.ceil((goal - (skill.xp ?? 0)) / Math.max(1, a.baseExperience ?? 1)));
+    const entries = [];
+    for (const k of per) {
+      const need = k.quantity * actions - (have(k.item) ?? 0);
+      if (need > 0) entries.push(...toEntries(buildRows(k.item, need, true)));
+    }
+    if (!entries.length) return { ok: false, reason: `couldn't work out how to get the materials for ${nm(a)}` };
+    if (entries.some((x) => x.kind === "manual")) return { ok: false, reason: `${nm(a)} needs something the queue can't get on its own` };
+    for (const x of entries) x.parent = e.id;
+    return { ok: true, entries, note: `Getting materials for ${nm(a)}` };
+  };
   // ---------- train a skill (no Township task needed) ----------
   // Two goals: make an amount of an item, or train to a level. A level goal never farms blindly: every method is ranked
   // by XP per hour of ALL the work it takes (gathering its materials included), and the plan only switches method when a
@@ -1337,7 +1381,8 @@ export function setup(ctx) {
       return { ok: false, reason: fa ? `${nm(fa)} can't be trained by the queue at level ${skill.level}` : `nothing at ${nm(skill)} level ${skill.level} can be trained by the queue on its own (it may need shop items or monster drops)` };
     }
     const b = plan.batches[0];
-    const actions = Math.max(1, Math.ceil((xpAt(b.to) - (skill.xp ?? 0)) / b.c.xpPer));
+    const goalXp = Math.min(xpAt(b.to), e.targetXp ?? Infinity);
+    const actions = Math.max(1, Math.ceil((goalXp - (skill.xp ?? 0)) / b.c.xpPer));
     const item = b.c.a.product;
     const rows = buildRows(item, actions * b.c.per, true);
     const entries = toEntries(rows);
@@ -1345,6 +1390,7 @@ export function setup(ctx) {
     if (!last || last.itemId !== item.id) return { ok: false, reason: "couldn't work out the steps" };
     if (entries.some((x) => x.kind === "manual")) return { ok: false, reason: `${nm(item)} needs something the queue can't get on its own` };
     Object.assign(last, { untilLevel: b.to, untilSkill: skill.id, sellAll: !!e.sellMade });
+    if (e.targetXp !== undefined && e.targetXp <= xpAt(b.to)) last.untilXp = e.targetXp;
     for (const x of entries) x.parent = e.id;
     return { ok: true, entries, to: b.to, note: `${nm(b.c.a)} until level ${b.to} (about ${Math.round(b.c.rate).toLocaleString()} XP/h)` };
   };
@@ -1863,7 +1909,7 @@ export function setup(ctx) {
         itemMissing, areaMissing, missingHtml, reqText, buildRows, toEntries, itemSection, sourceHtml, buyHtml, buyFromShop, wikiUrl,
         monsterSection, foodHtml, setsHtml, describeGoal, entryKey, addUnique, dupHtml, tellPlayer, xpCandidates, xpSection, estimateMs,
         startAction, startEntry, killEntry, areaFor, obtainable, fire, openTrain, trainBuild, trainQueue, TS,
-        trainPlan, trainCands, acquireMs, nextBatch, trainEstimate, fmtDur, Astro, Farm, farmSkills, farmFights, farmPlan, fightSafety, monsterMaxHit, dropPerKill, isFarmItem, farmHtml, astroCons, astroOptions, bestCon, astroHtml, isAstroItem,
+        xpMaterialBatch, trainPlan, trainCands, acquireMs, nextBatch, trainEstimate, fmtDur, Astro, Farm, farmSkills, farmFights, farmPlan, fightSafety, monsterMaxHit, dropPerKill, isFarmItem, farmHtml, astroCons, astroOptions, bestCon, astroHtml, isAstroItem,
       },
     };
     LOG("installed", VERSION);
