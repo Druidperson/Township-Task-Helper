@@ -2,6 +2,7 @@
 
 ## 0.11.1
 - Fixed: pressing Stop while a manual step was waiting for you left it marked as waiting, so the next Start counted it as done. Stop now puts it back to pending.
+- Fixed: the source and shop lookups no longer depend on another popup having been opened first.
 - Adds a test suite (see the tests folder) and the hooks it needs.
 
 ## 0.11.0

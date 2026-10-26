@@ -118,6 +118,7 @@ export function setup(ctx) {
   };
   // where an item comes from, as structured parts
   const sourceParts = (id) => {
+    buildIndex();
     const parts = [];
     const g = idx.gatherers.get(id);
     if (g) parts.push({ fa: "fa-hand-paper", label: "Gather", items: g.slice(0, 3).map(where) });
@@ -147,6 +148,7 @@ export function setup(ctx) {
       ? chip(`<i class="fa fa-exclamation-triangle"></i>&nbsp;Needs ${esc(nm(skill))} level ${a.level} (you have ${skill.level})`, "warn")
       : "";
   const lvlWarn = (id) => {
+    buildIndex();
     if (idx.shop.get(id)) return "";
     const opts = [...(idx.gatherers.get(id) ?? []), ...(idx.randoms.get(id) ?? [])];
     if (!opts.length || opts.some((x) => (x.a.level ?? 1) <= x.skill.level)) return "";
@@ -154,6 +156,7 @@ export function setup(ctx) {
     return `<div class="mbd-chips">${lvlChip(best.skill, best.a)}</div>`;
   };
   const buyHtml = (id, need) => {
+    buildIndex();
     const p = idx.shop.get(id)?.[0];
     if (!p || need <= 0) return "";
     try {
