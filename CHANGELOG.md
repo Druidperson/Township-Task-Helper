@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.0
+- Combat tasks can now be queued. The Action Queue starts the fight in the right combat area and counts kills. If the fight stops (you died or ran out of food), it pauses and tells you.
+- Dungeon and stronghold monsters can't be started by the queue yet, so those pause with a message.
+- Steps now show a warning when you don't have the level for them, in the task popup and in the queue.
+- Steps for items sold in the shop (feathers for arrows, for example) get a Buy button that buys the exact amount needed.
+- Random drops list the skill once (Woodcutting for bird nests) instead of every action in it.
+- The three popup buttons are now the same height.
+- "Weak to" now says what the weakness is based on (for example "Magic beats Melee").
+- Fixed the small numbers in the defence bonus chips sitting a few pixels off.
+
 ## 0.7.1
 - The buttons in the task popup sit closer together (about 5px apart) and stay centered.
 

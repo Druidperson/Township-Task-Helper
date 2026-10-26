@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.7.1";
+  const VERSION = "0.8.0";
   const LOG = (...a) => console.log("[Township Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => String(o?.name ?? o?._name ?? o?._localID ?? o?.id ?? "?");
@@ -98,7 +98,7 @@ export function setup(ctx) {
   };
 
   const num = (n) => Number(n).toLocaleString();
-  const chip = (html, cls = "", title = "") => `<span class="mbd-chip ${cls}"${title ? ` title="${esc(title)}"` : ""}>${html}</span>`;
+  const chip = (html, cls = "", title = "") => `<span class="mbd-chip ${cls}"${title ? ` title="${esc(title)}"` : ""}><span>${html}</span></span>`;
   const where = (x) => `${esc(nm(x.skill))}: ${esc(nm(x.a))} (Lv ${x.a.level ?? 1})`;
   const shopCost = (p) => {
     const cur = (p.costs?.currencies ?? []).map((c) => `${Number(c.cost ?? c.quantity ?? 0).toLocaleString()} ${esc(nm(c.currency))}`);
@@ -111,7 +111,7 @@ export function setup(ctx) {
     const g = idx.gatherers.get(id);
     if (g) parts.push({ fa: "fa-hand-paper", label: "Gather", items: g.slice(0, 3).map(where) });
     const r = idx.randoms.get(id);
-    if (r) parts.push({ fa: "fa-dice", label: "Random drop", items: r.slice(0, 3).map(where) });
+    if (r) parts.push({ fa: "fa-dice", label: "Random drop", items: [...new Map(r.map((x) => [x.skill.id, x.skill])).values()].slice(0, 4).map((sk) => esc(nm(sk))) });
     const d = idx.droppers.get(id);
     if (d) parts.push({ fa: "fa-skull", label: "Monster drop", items: [...d.slice(0, 4).map((m) => esc(nm(m))), ...(d.length > 4 ? [`+${d.length - 4} more`] : [])] });
     const s = idx.shop.get(id);
@@ -129,6 +129,37 @@ export function setup(ctx) {
   };
 
   // ---------- breakdown rows -> popup html / queue entries ----------
+  const lvlChip = (skill, a) =>
+    skill && (a.level ?? 1) > skill.level
+      ? chip(`<i class="fa fa-exclamation-triangle"></i>&nbsp;Needs ${esc(nm(skill))} level ${a.level} (you have ${skill.level})`, "warn")
+      : "";
+  const lvlWarn = (id) => {
+    if (idx.shop.get(id)) return "";
+    const opts = [...(idx.gatherers.get(id) ?? []), ...(idx.randoms.get(id) ?? [])];
+    if (!opts.length || opts.some((x) => (x.a.level ?? 1) <= x.skill.level)) return "";
+    const best = opts.reduce((m, x) => ((x.a.level ?? 1) - x.skill.level < (m.a.level ?? 1) - m.skill.level ? x : m));
+    return `<div class="mbd-chips">${lvlChip(best.skill, best.a)}</div>`;
+  };
+  const buyHtml = (id, need) => {
+    const p = idx.shop.get(id)?.[0];
+    if (!p || need <= 0) return "";
+    try {
+      const per = Math.max(1, p.contains.items.find((c) => c.item.id === id)?.quantity ?? 1);
+      let n = Math.ceil(need / per);
+      if (!p.allowQuantityPurchase) n = Math.min(n, 1);
+      n = Math.min(n, game.shop.capPurchaseQuantity(p, n));
+      if (!(n > 0)) return "";
+      const bought = game.shop.getPurchaseCount(p);
+      const parts = [];
+      for (const c of p.costs.currencies ?? []) parts.push(`${num(game.shop.getCurrencyCost(c, n, bought))} ${esc(nm(c.currency))}`);
+      for (const c of p.costs.items ?? []) parts.push(`${num(c.quantity * n)} ${esc(nm(c.item))}`);
+      const ok = game.shop.getPurchaseCosts(p, n).checkIfOwned() && game.checkRequirements(p.purchaseRequirements);
+      const label = `<i class="fa fa-shopping-cart mr-1"></i>Buy ${num(n * per)} ${esc(nm(itemById(id)))} for ${parts.join(" + ")}`;
+      return `<div class="mbd-chips"><button type="button" class="btn btn-sm ${ok ? "btn-success" : "btn-outline-secondary"}" data-mbd-buy="${esc(p.id)}" data-n="${n}"${ok ? "" : " disabled"}>${label}</button></div>` +
+        (ok ? "" : `<div class="mbd-chips">${chip("You can't afford this yet, or it's locked", "warn")}</div>`);
+    } catch (e) { console.warn("[Township Helper] shop button", e); return ""; }
+  };
+
   const buildRows = (item, qty) => {
     buildIndex();
     const nodes = new Map();
@@ -150,10 +181,11 @@ export function setup(ctx) {
         title = `${icon(c.skill)}<b>${esc(nm(c.skill))}</b>: make ${icon(n.item)}<b>${esc(nm(n.item))}</b> &times;${num(n.qty)}`;
         chips =
           `<div class="mbd-chips">${chip(`Level ${c.a.level ?? 1}`)}${chip(`${num(crafts)} craft${crafts === 1 ? "" : "s"}`)}${haveChip}${alts > 0 ? chip(`${alts} other option${alts === 1 ? "" : "s"}`) : ""}</div>` +
-          (uses.length ? `<div class="mbd-chips">${chip("<b>Uses</b>", "lbl")}${uses.join("")}</div>` : "");
+          (uses.length ? `<div class="mbd-chips">${chip("<b>Uses</b>", "lbl")}${uses.join("")}</div>` : "") +
+          (lvlChip(c.skill, c.a) ? `<div class="mbd-chips">${lvlChip(c.skill, c.a)}</div>` : "");
       } else {
         title = `${icon(n.item)}<b>${esc(nm(n.item))}</b> &times;${num(n.qty)}`;
-        chips = `<div class="mbd-chips">${haveChip}</div>` + sourceHtml(n.item.id);
+        chips = `<div class="mbd-chips">${haveChip}</div>` + sourceHtml(n.item.id) + buyHtml(n.item.id, Math.max(0, n.qty - (owned ?? 0))) + lvlWarn(n.item.id);
       }
       return `<div class="mbd-step"><div class="mbd-stepno">Step ${i + 1}</div><div class="mbd-title">${title}</div>${chips}</div>`;
     }).join("");
@@ -198,7 +230,7 @@ export function setup(ctx) {
     const lowStyles = new Set(Object.keys(def).filter((k) => def[k] === low && !(def.melee === def.ranged && def.ranged === def.magic)));
     const tri = TRIANGLE[m.attackType];
     const weak = [];
-    if (tri) weak.push(styleChip(tri, "ok", `Combat triangle: ${cap(tri)} beats ${cap(m.attackType)}`, " <small>triangle</small>"));
+    if (tri) weak.push(styleChip(tri, "ok", `Combat triangle: ${cap(tri)} beats ${cap(m.attackType)}`, ` <small>beats ${cap(m.attackType)}</small>`));
     for (const k of lowStyles) {
       if (k === tri) continue;
       weak.push(styleChip(k, "ok", `Lowest defence bonus (${def[k]})`, ` <small>low defence</small>`));
@@ -282,10 +314,20 @@ export function setup(ctx) {
 
   const heading = (t) => `<h5 class="font-w600 text-warning mt-3 mb-1">${t}</h5>`;
   // onQueue(top) is called with top=true for "Add to top", false for "Add to queue"
+  const buyFromShop = (id, n) => {
+    try {
+      const p = game.shop.purchases.getObjectByID(id);
+      if (!p || !(n > 0)) return;
+      const old = game.shop.buyQuantity;
+      game.shop.buyQuantity = n;
+      try { game.shop.buyItemOnClick(p, true); } finally { game.shop.buyQuantity = old; }
+    } catch (e) { console.warn("[Township Helper] buy failed", e); }
+  };
   const fire = (title, body, onQueue) => {
+    const bodyFn = typeof body === "function" ? body : () => body;
     const res = SwalLocale.fire({
       title,
-      html: `<div class="text-center font-size-sm mbd-th-pop">${body}</div>`,
+      html: `<div class="text-center font-size-sm mbd-th-pop">${bodyFn()}</div>`,
       confirmButtonText: "Close",
       showDenyButton: !!onQueue,
       denyButtonText: '<i class="fa fa-play mr-1"></i>Add to queue',
@@ -298,8 +340,24 @@ export function setup(ctx) {
         if (acts) Object.assign(acts.style, { display: "flex", justifyContent: "center", alignItems: "center", gap: "5px", flexWrap: "nowrap", margin: "1em auto 0" });
         // order: Add to queue, Add to top, Close
         const ord = { ".swal2-deny": "1", ".swal2-cancel": "2", ".swal2-confirm": "3" };
-        for (const [sel, o] of Object.entries(ord)) { const el = popup?.querySelector?.(sel); if (el) { el.style.order = o; el.style.setProperty("margin", "0", "important"); } }
+        const sz = { height: "36px", padding: "0 16px", "font-size": "14px", "line-height": "1", "box-sizing": "border-box", display: "inline-flex", "align-items": "center", "justify-content": "center", "box-shadow": "none", outline: "none", margin: "0" };
+        for (const [sel, o] of Object.entries(ord)) {
+          const el = popup?.querySelector?.(sel);
+          if (!el) continue;
+          el.style.order = o;
+          for (const [k, v] of Object.entries(sz)) el.style.setProperty(k, v, "important");
+          if (sel === ".swal2-confirm") el.style.setProperty("min-width", "84px", "important");
+        }
         popup?.addEventListener?.("click", (ev) => {
+          const bb = ev.target.closest?.("[data-mbd-buy]");
+          if (bb) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            buyFromShop(bb.dataset.mbdBuy, Number(bb.dataset.n));
+            const pop = popup.querySelector(".mbd-th-pop");
+            if (pop) pop.innerHTML = bodyFn();
+            return;
+          }
           const b = ev.target.closest?.("[data-mbd-set]");
           if (!b) return;
           ev.preventDefault();
@@ -332,7 +390,7 @@ export function setup(ctx) {
       // the runner never survives a reload, so nothing is "in progress" any more (progress counts are kept)
       for (const e of this.items) {
         if (e.status === "active" || e.status === "waiting" || e.status === "blocked") e.status = "pending";
-        delete e.reason; delete e.ack; delete e.t0; delete e.g0;
+        delete e.reason; delete e.ack; delete e.t0; delete e.g0; delete e.started;
       }
       updateBadge();
     },
@@ -502,7 +560,24 @@ export function setup(ctx) {
     }
     return { ok: false, reason: lastReason };
   };
-  const startEntry = (e) => (e.kind === "xp" ? startBest(e) : startAction(e));
+  const areaFor = (m) => {
+    for (const key of ["combatAreas", "slayerAreas"]) for (const a of list(game[key])) if ((a.monsters ?? []).includes(m)) return a;
+    return null;
+  };
+  const killCount = (e) => { try { return game.stats.monsterKillCount(game.monsters.getObjectByID(e.monsterId)) ?? 0; } catch (err) { return 0; } };
+  const startCombat = (e) => {
+    const m = game.monsters.getObjectByID(e.monsterId);
+    if (!m) return { ok: false, reason: "this monster wasn't found in your game version" };
+    const area = areaFor(m);
+    if (!area) return { ok: false, reason: "this monster is in a dungeon or special area, so fight it yourself, then press Start" };
+    try {
+      if (game.activeAction && game.activeAction !== game.combat) game.stopActiveAction();
+      game.combat.selectMonster(m, area);
+    } catch (err) { return { ok: false, reason: "error: " + err.message }; }
+    if (game.activeAction === game.combat && game.combat.selectedMonster === m) return { ok: true };
+    return { ok: false, reason: "couldn't start the fight (area requirements or a damage type rule)" };
+  };
+  const startEntry = (e) => (e.kind === "xp" ? startBest(e) : e.kind === "combat" ? startCombat(e) : startAction(e));
 
   // ---------- time estimates (base speeds; the active entry switches to its measured speed after a few seconds) ----------
   const intervalMs = (skill, a) =>
@@ -510,6 +585,7 @@ export function setup(ctx) {
   const msPerUnit = (e) => {
     const skill = skillById(e.skillId);
     if (!skill) return null;
+    if (e.kind === "combat") return null;
     if (e.kind === "xp") { const best = xpCandidates(skill, true)[0]; return best && best.rate > 0 ? 3600000 / best.rate : null; }
     const a = actionById(skill, e.actionId);
     if (!a) return null;
@@ -518,7 +594,7 @@ export function setup(ctx) {
     const opt = options(a)[e.altIndex ?? 0];
     return ms / Math.max(1, (a.baseQuantity ?? 1) * (opt?.mult ?? 1));
   };
-  const remainingUnits = (e) => (e.kind === "xp" ? Math.max(0, e.targetXp - (skillById(e.skillId)?.xp ?? 0)) : Math.max(0, e.qty - Runner.gained(e)));
+  const remainingUnits = (e) => (e.kind === "combat" ? Math.max(0, e.targetKills - Runner.gained(e)) : e.kind === "xp" ? Math.max(0, e.targetXp - (skillById(e.skillId)?.xp ?? 0)) : Math.max(0, e.qty - Runner.gained(e)));
   const estimateMs = (e) => {
     if (e.kind === "manual" || e.status === "done") return 0;
     const units = remainingUnits(e);
@@ -575,18 +651,20 @@ export function setup(ctx) {
       if (this.state === "running") { this.step(); Panel.render(); } else this.start();
     },
     gained(e) {
+      if (e.kind === "combat") { const c = killCount(e); return e.rel ? Math.max(0, c - (e.k0 ?? c)) : c; }
       if (e.kind === "xp") return Math.floor(skillById(e.skillId)?.xp ?? 0);
       if (e.startQty === undefined) return 0;
       return Math.max(0, (have(itemById(e.itemId)) ?? 0) - e.startQty);
     },
     haltAction() {
-      const s = this.activeSkillId ? skillById(this.activeSkillId) : null;
+      const s = this.activeSkillId === "combat" ? game.combat : this.activeSkillId ? skillById(this.activeSkillId) : null;
       try { if (s && game.activeAction === s) game.stopActiveAction(); } catch (e) { console.warn("[Township Helper]", e); }
     },
     leave() {
       if (this.activeId === null) return;
       const prev = Queue.items.find((e) => e.id === this.activeId);
       if (prev && prev.status === "active") prev.status = "pending";
+      if (prev) delete prev.started;
       this.haltAction();
       this.activeId = null;
       this.activeSkillId = null;
@@ -595,6 +673,7 @@ export function setup(ctx) {
       const cur = this.current();
       if (!cur) { this.setState("idle", "Nothing to run: the queue is empty or finished."); return; }
       if (cur.kind === "manual" && cur.status === "waiting") cur.ack = true;
+      delete cur.started;
       if (this.state === "idle") this.elapsed = 0;
       this.state = "running";
       this.message = "";
@@ -609,7 +688,7 @@ export function setup(ctx) {
     stop() {
       this.haltAction();
       const cur = Queue.items.find((e) => e.id === this.activeId);
-      if (cur && cur.status !== "done") { cur.status = "pending"; delete cur.startQty; delete cur.reason; }
+      if (cur && cur.status !== "done") { cur.status = "pending"; delete cur.startQty; delete cur.reason; delete cur.started; }
       this.activeId = null;
       this.activeSkillId = null;
       this.focusId = null;
@@ -621,6 +700,7 @@ export function setup(ctx) {
     block(entry, reason) {
       entry.status = "blocked";
       entry.reason = reason;
+      delete entry.started;
       this.haltAction();
       this.activeId = null;
       this.activeSkillId = null;
@@ -630,7 +710,8 @@ export function setup(ctx) {
     finish(entry) {
       entry.status = "done";
       delete entry.reason;
-      const s = skillById(entry.skillId);
+      delete entry.started;
+      const s = entry.kind === "combat" ? game.combat : skillById(entry.skillId);
       try { if (s && game.activeAction === s) game.stopActiveAction(); } catch (e) { console.warn("[Township Helper]", e); }
       this.activeId = null;
       this.activeSkillId = null;
@@ -649,10 +730,10 @@ export function setup(ctx) {
         if (this.activeId !== cur.id) {
           this.leave();
           this.activeId = cur.id;
-          this.activeSkillId = cur.skillId ?? null;
+          this.activeSkillId = cur.kind === "combat" ? "combat" : cur.skillId ?? null;
           cur.status = "active";
           delete cur.reason;
-          if (cur.kind !== "manual" && cur.kind !== "xp" && cur.startQty === undefined) cur.startQty = have(itemById(cur.itemId)) ?? 0;
+          if (cur.kind !== "manual" && cur.kind !== "xp" && cur.kind !== "combat" && cur.startQty === undefined) cur.startQty = have(itemById(cur.itemId)) ?? 0;
           Queue.save();
           if (cur.kind !== "manual") {
             const r = startEntry(cur);
@@ -664,6 +745,7 @@ export function setup(ctx) {
           }
           cur.t0 = Date.now();
           cur.g0 = this.gained(cur);
+          if (cur.kind === "combat") { cur.started = true; if (cur.rel && cur.k0 === undefined) cur.k0 = killCount(cur); }
         }
 
         if (cur.kind === "xp") {
@@ -681,6 +763,18 @@ export function setup(ctx) {
           if (rx.ok) { Panel.render(); return; }
           if (rx.transient) { this.message = rx.reason; Panel.render(); return; }
           this.block(cur, `${rx.reason} (${this.gained(cur).toLocaleString()} of ${Number(cur.targetXp).toLocaleString()} XP)`);
+          return;
+        }
+
+        if (cur.kind === "combat") {
+          const mon = game.monsters.getObjectByID(cur.monsterId);
+          if (this.gained(cur) >= cur.targetKills) { this.finish(cur); continue; }
+          if (game.activeAction === game.combat && game.combat.selectedMonster === mon) { Panel.render(); return; }
+          if (game.activeAction && game.activeAction !== game.combat) { this.pause("Paused: something else started running."); return; }
+          if (cur.started) { this.block(cur, `the fight stopped (you may have died or run out of food). ${this.gained(cur).toLocaleString()} of ${Number(cur.targetKills).toLocaleString()} kills done`); return; }
+          const rc = startCombat(cur);
+          if (rc.ok) { cur.started = true; Panel.render(); return; }
+          this.block(cur, rc.reason);
           return;
         }
 
@@ -712,6 +806,11 @@ export function setup(ctx) {
   };
 
   // ---------- floating panel ----------
+  const levelIssue = (e) => {
+    if (e.kind !== "craft" && e.kind !== "gather") return null;
+    const sk = skillById(e.skillId), a = sk && actionById(sk, e.actionId);
+    return a && (a.level ?? 1) > sk.level ? `Needs ${nm(sk)} level ${a.level} (you have ${sk.level})` : null;
+  };
   const POS_KEY = "mbd-th-panel-pos";
   const Panel = {
     el: null,
@@ -784,19 +883,22 @@ export function setup(ctx) {
     },
     row(e) {
       const isXp = e.kind === "xp";
-      const item = isXp ? skillById(e.skillId) : itemById(e.itemId);
+      const isCombat = e.kind === "combat";
+      const item = isXp ? skillById(e.skillId) : isCombat ? game.monsters.getObjectByID(e.monsterId) : itemById(e.itemId);
       const manual = e.kind === "manual";
       const done = e.status === "done";
-      const warn = e.status === "blocked" || e.status === "waiting";
+      const issue = !done && !manual ? levelIssue(e) : null;
+      const warn = e.status === "blocked" || e.status === "waiting" || !!issue;
       const lead = done ? '<i class="fa fa-check text-success mr-2"></i>'
         : e.status === "active" ? '<i class="fa fa-play text-success mr-2"></i>'
         : warn ? '<i class="fa fa-exclamation-triangle text-warning mr-2"></i>'
         : '<i class="fa fa-circle mr-2" style="opacity:.25;font-size:8px;vertical-align:middle"></i>';
-      const showProgress = !manual && !done && (isXp || (e.startQty !== undefined && (e.status === "active" || e.status === "blocked" || Runner.gained(e) > 0)));
-      const amount = isXp ? `<b>${Runner.gained(e).toLocaleString()} / ${Number(e.targetXp).toLocaleString()} XP</b>` : showProgress ? `<b>${Runner.gained(e).toLocaleString()} / ${Number(e.qty).toLocaleString()}</b>` : `<b>x${Number(e.qty).toLocaleString()}</b>`;
+      const showProgress = !manual && !done && (isXp || isCombat || (e.startQty !== undefined && (e.status === "active" || e.status === "blocked" || Runner.gained(e) > 0)));
+      const amount = isCombat ? `<b>${Runner.gained(e).toLocaleString()} / ${Number(e.targetKills).toLocaleString()} kills</b>` : isXp ? `<b>${Runner.gained(e).toLocaleString()} / ${Number(e.targetXp).toLocaleString()} XP</b>` : showProgress ? `<b>${Runner.gained(e).toLocaleString()} / ${Number(e.qty).toLocaleString()}</b>` : `<b>x${Number(e.qty).toLocaleString()}</b>`;
       const btn = (act, ic, title) =>
         `<a data-act="${act}" data-id="${esc(e.id)}" class="pointer-enabled text-white-50 ml-2" title="${title}"><i class="fa ${ic}"></i></a>`;
       const sub = e.reason ? `<br><small class="text-warning">${esc(e.reason)}</small>`
+        : issue ? `<br><small class="text-warning"><i class="fa fa-exclamation-triangle"></i> ${esc(issue)}</small>`
         : isXp && e.status === "active" && e.method ? `<br><small class="text-muted">using ${esc(e.method)}</small>`
         : manual && !done ? `<br><small class="text-muted">do this yourself${e.status === "waiting" ? " (waiting for you)" : ""}</small>` : "";
       return (
@@ -888,6 +990,12 @@ export function setup(ctx) {
   };
 
   // ---------- goal -> popup ----------
+  const killEntry = (goal, total) => {
+    const m = goal.monster;
+    const need = total ? goal.quantity : Math.max(0, goal.quantity - (goal._progress ?? 0));
+    if (total ? game.stats.monsterKillCount(m) >= goal.quantity : need <= 0) return [];
+    return [{ kind: "combat", monsterId: m.id, targetKills: need, rel: !total, qty: need, label: `Defeat ${nm(m)}` }];
+  };
   const describeGoal = (goal) => {
     const type = goal?.constructor?.name;
     if (type === "TownshipItemGoal" && goal.item) {
@@ -908,7 +1016,7 @@ export function setup(ctx) {
       };
     }
     if ((type === "TownshipMonsterGoal" || type === "TownshipCasualMonsterGoal") && goal.monster) {
-      return { title: esc(nm(goal.monster)), body: () => monsterSection(goal.monster, goal.quantity) };
+      return { title: esc(nm(goal.monster)), body: () => monsterSection(goal.monster, goal.quantity), queue: () => killEntry(goal, type === "TownshipMonsterGoal") };
     }
     if (type === "TownshipMonsterWithItemsGoal" && goal.monster) {
       return {
@@ -916,7 +1024,7 @@ export function setup(ctx) {
         body: () =>
           monsterSection(goal.monster, goal.quantity) +
           (goal.items ?? []).map((it) => heading(`Equipment needed: ${esc(nm(it))}`) + itemSection(it, 1)).join(""),
-        queue: () => (goal.items ?? []).flatMap((it) => toEntries(buildRows(it, 1))),
+        queue: () => [...(goal.items ?? []).flatMap((it) => toEntries(buildRows(it, 1))), ...killEntry(goal, false)],
       };
     }
     return null;
@@ -945,7 +1053,7 @@ export function setup(ctx) {
           Panel.open();
           if (Settings.autoStart() && Runner.state !== "running") Runner.start();
         } : null;
-        fire(info.title, info.body(), onQueue);
+        fire(info.title, info.body, onQueue);
       } catch (e) { console.warn("[Township Helper]", e); }
     });
     holder.appendChild(btn);
@@ -978,7 +1086,8 @@ export function setup(ctx) {
       .mbd-sec{font-weight:600;margin:12px 0 4px;font-size:14px;opacity:.85}
       .mbd-row{margin:8px 0}
       .mbd-rowlbl{font-size:12px;font-weight:600;opacity:.7}
-      .mbd-chip small{opacity:.8}
+      .mbd-chip>span{display:inline;line-height:20px}
+      .mbd-chip small{opacity:.8;font-size:.8em}
       .mbd-sets .btn{margin:0 2px}
       .mbd-place{margin:3px 0;font-size:13px}
       .mbd-place img{width:18px;height:18px;margin-right:4px;vertical-align:middle}
@@ -1007,7 +1116,7 @@ export function setup(ctx) {
       version: VERSION,
       showItem: (id, qty = 1) => {
         const it = itemById(id);
-        fire(`${qty} x ${esc(nm(it))}`, itemSection(it, qty), (top) => {
+        fire(`${qty} x ${esc(nm(it))}`, () => itemSection(it, qty), (top) => {
           Queue.add(toEntries(buildRows(it, qty)), top);
           Panel.open();
           if (Settings.autoStart() && Runner.state !== "running") Runner.start();
