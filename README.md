@@ -34,15 +34,6 @@ Subscribe on mod.io from the in-game Mod Manager (Browse tab): https://mod.io/g/
 
 To try it from source, zip `manifest.json` and `setup.mjs` (both at the top level of the zip) and load it as a local mod with the Melvor Creator Toolkit.
 
-## Known limits
-
-- The XP ranking uses base XP per hour. Mastery and other bonuses aren't counted.
-- The queue can't start fights in dungeons or strongholds. It pauses on those and asks you to fight them yourself.
-- For XP goals, the queue doesn't gather materials first. If you don't have them in your bank when it reaches that step, it pauses.
-- When an item has several recipes, the breakdown uses the first one.
-- The game has to stay open for the queue to run. A hidden browser tab slows the game down.
-- Tested the most with Woodcutting, Mining, Smithing, Firemaking and low-level combat. Cooking, Fishing, Crafting, Herblore and Runecrafting should work but haven't had much testing.
-
 ## Bugs and ideas
 
 Open an issue. For a bug, say which task or item it happened on and what you expected to see.
