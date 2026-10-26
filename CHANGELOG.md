@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.10.1
+- The wiki link now always opens in a new tab and never changes the game's own tab. If the browser blocks the new tab, the link is copied instead.
+
 ## 0.10.0
 - The mod now checks the queue for duplicates. If steps from a task are already queued, the popup says so and lists them.
 - Adding a task skips steps that are already in the queue and tells you which ones were skipped. If the whole task is already queued, nothing is added.

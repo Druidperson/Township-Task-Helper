@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.10.0";
+  const VERSION = "0.10.1";
   const LOG = (...a) => console.log("[Township Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => String(o?.name ?? o?._name ?? o?._localID ?? o?.id ?? "?");
@@ -130,7 +130,7 @@ export function setup(ctx) {
     return parts;
   };
   const wikiUrl = (id) => `https://wiki.melvoridle.com/index.php?search=${encodeURIComponent(nm(itemById(id)))}`;
-  const wikiChip = (id) => chip(`<a href="${esc(wikiUrl(id))}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline"><i class="fa fa-book mr-1"></i>Look it up on the Melvor wiki</a>`);
+  const wikiChip = (id) => chip(`<a data-mbd-wiki href="${esc(wikiUrl(id))}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline"><i class="fa fa-book mr-1"></i>Look it up on the Melvor wiki</a>`);
   const sourceText = (id) => {
     const parts = sourceParts(id);
     return parts.length ? parts.map((p) => `${p.label}: ${p.items.join("; ")}`).join(" | ") : `no source found in the game data (chest, event or other). Try the wiki: ${wikiUrl(id)}`;
@@ -425,6 +425,16 @@ export function setup(ctx) {
           if (sel === ".swal2-confirm") el.style.setProperty("min-width", "84px", "important");
         }
         popup?.addEventListener?.("click", (ev) => {
+          const wk = ev.target.closest?.("[data-mbd-wiki]");
+          if (wk) {
+            // always a new tab; never navigate the game's own tab
+            ev.preventDefault();
+            ev.stopPropagation();
+            let w = null;
+            try { w = window.open(wk.href, "_blank"); if (w) w.opener = null; } catch (e) { /* blocked */ }
+            if (!w) { try { navigator.clipboard.writeText(wk.href); } catch (e) { /* ignore */ } tellPlayer("Your browser blocked the new tab. The wiki link was copied, paste it into a new tab."); }
+            return;
+          }
           const bb = ev.target.closest?.("[data-mbd-buy]");
           if (bb) {
             ev.preventDefault();
