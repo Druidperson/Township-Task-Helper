@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.7.0";
+  const VERSION = "0.7.1";
   const LOG = (...a) => console.log("[Township Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => String(o?.name ?? o?._name ?? o?._localID ?? o?.id ?? "?");
@@ -295,10 +295,10 @@ export function setup(ctx) {
       customClass: { confirmButton: "btn btn-primary m-1", denyButton: "btn btn-success m-1", cancelButton: "btn btn-warning m-1" },
       didOpen: (popup) => {
         const acts = popup?.querySelector?.(".swal2-actions");
-        if (acts) Object.assign(acts.style, { display: "flex", justifyContent: "center", alignItems: "center", gap: "12px", flexWrap: "nowrap" });
+        if (acts) Object.assign(acts.style, { display: "flex", justifyContent: "center", alignItems: "center", gap: "5px", flexWrap: "nowrap", margin: "1em auto 0" });
         // order: Add to queue, Add to top, Close
         const ord = { ".swal2-deny": "1", ".swal2-cancel": "2", ".swal2-confirm": "3" };
-        for (const [sel, o] of Object.entries(ord)) { const el = popup?.querySelector?.(sel); if (el) el.style.order = o; }
+        for (const [sel, o] of Object.entries(ord)) { const el = popup?.querySelector?.(sel); if (el) { el.style.order = o; el.style.setProperty("margin", "0", "important"); } }
         popup?.addEventListener?.("click", (ev) => {
           const b = ev.target.closest?.("[data-mbd-set]");
           if (!b) return;

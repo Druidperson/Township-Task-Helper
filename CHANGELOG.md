@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.7.1
+- The buttons in the task popup sit closer together (about 5px apart) and stay centered.
+
 ## 0.7.0
 - New setting: "Automatically start the Action Queue when adding a task" (On or Off). It is in the mod's settings, and there is also an Auto-start toggle at the bottom of the queue panel.
 - Popup buttons now read Add to queue, Add to top, Close, with Close on the right.
