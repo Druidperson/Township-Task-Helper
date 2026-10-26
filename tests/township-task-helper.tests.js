@@ -670,8 +670,9 @@
     if (goal !== "level") setv("mbd-tr-goal", goal);
   };
   test(U, "opens from the minibar button with a skill list and a live preview", () => sandbox(async () => {
+    D().TS.goal = "level"; // the popup remembers the last goal you used
     document.getElementById("mbd-train-btn").click();
-    await sleep(100);
+    ok(await popupReady(), "popup never finished opening");
     const sel = document.getElementById("mbd-tr-skill");
     ok(sel, "popup");
     ok(sel.options.length >= TRAINABLE.length, "skills listed");
