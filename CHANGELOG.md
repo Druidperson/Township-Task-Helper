@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.13.6
+- Cooking plans now count burnt food. A cook only gives food and XP when it works, so at a 77% success rate the queue gathers about a third more raw food, the time estimate is longer, and cooking methods are ranked by the XP per hour they really give. This covers Township tasks, XP tasks, the train planner and the restock step, so the queue runs out of materials far less often.
+
 ## 0.13.5
 - The automatic fight for dropped items is now the most efficient safe one, not just the one with the best drop rate. It weighs how long you take to kill the monster, how many kills the farm needs, and how much of your food it burns. A Slayer task monster gets a bonus because those kills count twice.
 - Each fight in the picker shows about how long the farm takes, and the chosen fight shows kills, time and food.

@@ -1075,6 +1075,51 @@
     ok(!/Infinity|NaN/.test(document.querySelector(".mbd-th-pop").textContent), "bad number in the popup");
   }));
 
+  const BR = "Burn rate";
+  const burnAt = (pct) => stub(skill("Cooking"), "getRecipeSuccessChance", () => pct);
+  const rawShrimpIn = (rows) => rows.find((r) => r.item.id === "melvorD:Raw_Shrimp")?.qty;
+  test(BR, "the burn rate is read from the game and never goes below 5%", () => sandbox(async () => {
+    const { a } = cookShrimp();
+    if (!a) skip("no Shrimp recipe");
+    burnAt(50); eq(D().succ(skill("Cooking"), a), 0.5);
+    burnAt(100); eq(D().succ(skill("Cooking"), a), 1);
+    burnAt(0.1); eq(D().succ(skill("Cooking"), a), 0.05);
+    eq(D().succ(skill("Woodcutting"), list(skill("Woodcutting").actions)[0]), 1, "skills that never fail");
+  }));
+  test(BR, "a task breakdown asks for extra raw food to cover the burnt ones", () => sandbox(async () => {
+    const { a } = cookShrimp();
+    if (!a) skip("no Shrimp recipe");
+    const shrimp = game.items.getObjectByID("melvorD:Shrimp");
+    bankStub(() => 0);
+    burnAt(100);
+    const none = rawShrimpIn(D().buildRows(shrimp, 10, true));
+    burnAt(50);
+    const half = rawShrimpIn(D().buildRows(shrimp, 10, true));
+    eq(none, 10); eq(half, 20);
+  }));
+  test(BR, "a restock after burning counts the burn rate too", () => sandbox(async () => {
+    const { a } = cookShrimp();
+    if (!a) skip("no Shrimp recipe");
+    bankStub((id) => (id === "melvorD:Shrimp" ? 3 : 0));
+    burnAt(50);
+    const r = D().restockCraft(shrimpEntry());
+    eq(r.remaining, 7);
+    eq(r.entries.find((x) => x.kind === "gather").qty, 14);
+  }));
+  test(BR, "cooking is ranked and timed by what survives the pan", () => sandbox(async () => {
+    const { sk, a } = cookShrimp();
+    if (!a) skip("no Shrimp recipe");
+    burnAt(100);
+    const full = D().xpCandidates(sk, true).find((c) => c.a === a)?.rate;
+    burnAt(50);
+    const half = D().xpCandidates(sk, true).find((c) => c.a === a)?.rate;
+    ok(full > 0 && Math.abs(half - full / 2) < 1, `expected half the XP/hour, got ${half} vs ${full}`);
+    const e = { kind: "craft", skillId: sk.id, actionId: a.id, itemId: "melvorD:Shrimp", qty: 10, startQty: 0, altIndex: 0 };
+    const slow = D().estimateMs(e);
+    burnAt(100);
+    ok(slow > D().estimateMs(e) * 1.9, "burning half should roughly double the time");
+  }));
+
   // =====================================================================================
   const run = async (opts = {}) => {
     const { live = true, group = null, only = null } = opts;

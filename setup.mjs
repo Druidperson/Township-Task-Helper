@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.13.5";
+  const VERSION = "0.13.6";
   const LOG = (...a) => console.log("[Township Task Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => {
@@ -90,6 +90,17 @@ export function setup(ctx) {
     return idx;
   };
 
+  // Cooking burns some food: costs are used every attempt, but the product and the XP only come from the ones that work.
+  // Returns the share of attempts that succeed (1 for every skill that never fails).
+  const succ = (skill, a) => {
+    try {
+      if (skill?.id === "melvorD:Cooking" && typeof skill.getRecipeSuccessChance === "function") {
+        const c = Number(skill.getRecipeSuccessChance(a));
+        if (c > 0 && c < 100) return Math.max(0.05, c / 100);
+      }
+    } catch (e) { /* ignore */ }
+    return 1;
+  };
   const baseCosts = (a) => (Array.isArray(a.itemCosts) ? a.itemCosts : []);
   const options = (a) =>
     a.alternativeCosts?.length
@@ -104,7 +115,7 @@ export function setup(ctx) {
     const c = idx.crafters.get(item.id)?.[0];
     if (!c || path.has(item.id) || depth > 12) return;
     const opt = options(c.a)[0];
-    const per = Math.max(1, (c.a.baseQuantity ?? 1) * opt.mult);
+    const per = Math.max(1, (c.a.baseQuantity ?? 1) * opt.mult) * succ(c.skill, c.a);
     const crafts = Math.ceil(qty / per);
     n.recipe = { c, opt, crafts };
     path.add(item.id);
@@ -455,7 +466,7 @@ export function setup(ctx) {
       n.qty = make;
       if (n.recipe) {
         const { c, opt } = n.recipe;
-        const per = Math.max(1, (c.a.baseQuantity ?? 1) * opt.mult);
+        const per = Math.max(1, (c.a.baseQuantity ?? 1) * opt.mult) * succ(c.skill, c.a);
         const crafts = Math.ceil(make / per);
         n.recipe = { c, opt, crafts };
         if (make > 0) {
@@ -836,7 +847,7 @@ export function setup(ctx) {
   const MELVOR_REALM = "melvorD:Melvor";
   const xpRate = (skill, a) => {
     const ms = a.baseInterval ?? (a.baseMinInterval !== undefined && a.baseMaxInterval !== undefined ? (a.baseMinInterval + a.baseMaxInterval) / 2 : skill.baseInterval) ?? 3000;
-    return ms > 0 ? ((a.baseExperience ?? 0) / ms) * 3600000 : 0;
+    return ms > 0 ? (((a.baseExperience ?? 0) * succ(skill, a)) / ms) * 3600000 : 0;
   };
   // which recipe input option (if any) the bank can pay for right now; null = not affordable
   const affordableOption = (a) => {
@@ -989,7 +1000,7 @@ export function setup(ctx) {
     const ms = intervalMs(skill, a);
     if (e.kind === "gather") return ms / Math.max(1, a.baseQuantity ?? 1);
     const opt = options(a)[e.altIndex ?? 0];
-    return ms / Math.max(1, (a.baseQuantity ?? 1) * (opt?.mult ?? 1));
+    return ms / Math.max(1, (a.baseQuantity ?? 1) * (opt?.mult ?? 1) * succ(skill, a));
   };
   const remainingUnits = (e) => (e.kind === "combat" ? Math.max(0, e.targetKills - Runner.gained(e)) : (e.kind === "xp" || e.kind === "train") ? Math.max(0, e.targetXp - (skillById(e.skillId)?.xp ?? 0)) : Math.max(0, e.qty - Runner.gained(e)));
   const estimateMs = (e) => {
@@ -1295,7 +1306,7 @@ export function setup(ctx) {
     const a = best.a;
     const per = (a.log ? [{ item: a.log, quantity: 1 }] : [...baseCosts(a), ...(options(a)[best.altIndex]?.costs ?? [])]).filter((k) => k?.item);
     const goal = Math.min(e.targetXp, xpAt(Math.min(skill.level + 5, levelCapFor(skill))));
-    const actions = Math.max(1, Math.ceil((goal - (skill.xp ?? 0)) / Math.max(1, a.baseExperience ?? 1)));
+    const actions = Math.max(1, Math.ceil((goal - (skill.xp ?? 0)) / Math.max(1, (a.baseExperience ?? 1) * succ(skill, a))));
     const entries = [];
     for (const k of per) {
       const need = k.quantity * actions - (have(k.item) ?? 0);
@@ -1312,7 +1323,7 @@ export function setup(ctx) {
     const skill = skillById(e.skillId), a = actionById(skill, e.actionId), item = itemById(e.itemId);
     if (!skill || !a || !item) return { ok: false, reason: "this action wasn't found in your game version" };
     const opt = options(a)[e.altIndex ?? 0] ?? { costs: [], mult: 1 };
-    const per = Math.max(1, (a.baseQuantity ?? 1) * opt.mult);
+    const per = Math.max(1, (a.baseQuantity ?? 1) * opt.mult) * succ(skill, a);
     const remaining = e.qty - Math.max(0, (have(item) ?? 0) - (e.startQty ?? 0));
     const crafts = Math.max(1, Math.ceil(remaining / per));
     const entries = [];
@@ -1351,9 +1362,10 @@ export function setup(ctx) {
     if (c) {
       if (!isTrainable(c.skill) || (c.a.level ?? 1) > levelIn(c.skill, lv)) return NO;
       const opt = options(c.a)[0];
-      const per = Math.max(1, (c.a.baseQuantity ?? 1) * opt.mult);
-      const crafts = n / per; // not rounded up: this ranks methods by their steady rate
-      let ms = crafts * intervalMs(c.skill, c.a), xp = c.skill.id === skillId ? crafts * (c.a.baseExperience ?? 0) : 0;
+      const sr = succ(c.skill, c.a);
+      const per = Math.max(1, (c.a.baseQuantity ?? 1) * opt.mult) * sr;
+      const crafts = n / per; // attempts, not rounded up: this ranks methods by their steady rate
+      let ms = crafts * intervalMs(c.skill, c.a), xp = c.skill.id === skillId ? crafts * sr * (c.a.baseExperience ?? 0) : 0;
       seen.add(item.id);
       for (const k of [...baseCosts(c.a), ...opt.costs]) {
         if (!k?.item) continue;
@@ -1386,8 +1398,9 @@ export function setup(ctx) {
       const st = stepFor(a);
       if (!st) continue;
       const opt = st.craft ? options(a)[0] : { costs: [], mult: 1 };
-      const per = Math.max(1, (a.baseQuantity ?? 1) * opt.mult);
-      let ms = intervalMs(skill, a), xpPer = a.baseExperience;
+      const sr = succ(skill, a);
+      const per = Math.max(1, (a.baseQuantity ?? 1) * opt.mult) * sr; // products per attempt
+      let ms = intervalMs(skill, a), xpPer = a.baseExperience * sr;
       if (st.craft) for (const k of [...baseCosts(a), ...opt.costs]) if (k?.item) { const r = acquire(k.item, k.quantity, lv, skill.id); ms += r.ms; xpPer += r.xp; }
       if (!isFinite(ms) || ms <= 0) continue;
       out.push({ a, per, ms, xpPer, rate: (xpPer / ms) * 3600000 });
@@ -1433,7 +1446,7 @@ export function setup(ctx) {
     const goalXp = Math.min(xpAt(b.to), e.targetXp ?? Infinity);
     const actions = Math.max(1, Math.ceil((goalXp - (skill.xp ?? 0)) / b.c.xpPer));
     const item = b.c.a.product;
-    const rows = buildRows(item, actions * b.c.per, true);
+    const rows = buildRows(item, Math.ceil(actions * b.c.per), true);
     const entries = toEntries(rows);
     const last = entries[entries.length - 1];
     if (!last || last.itemId !== item.id) return { ok: false, reason: "couldn't work out the steps" };
@@ -1958,7 +1971,7 @@ export function setup(ctx) {
         itemMissing, areaMissing, missingHtml, reqText, buildRows, toEntries, itemSection, sourceHtml, buyHtml, buyFromShop, wikiUrl,
         monsterSection, foodHtml, setsHtml, describeGoal, entryKey, addUnique, dupHtml, tellPlayer, xpCandidates, xpSection, estimateMs,
         startAction, startEntry, killEntry, areaFor, obtainable, fire, openTrain, trainBuild, trainQueue, TS,
-        xpMaterialBatch, restockCraft, trainPlan, trainCands, acquireMs, nextBatch, trainEstimate, fmtDur, Astro, Farm, farmSkills, farmFights, farmPlan, fightSafety, monsterMaxHit, dropPerKill, isFarmItem, farmHtml, astroCons, astroOptions, bestCon, astroHtml, isAstroItem,
+        succ, xpMaterialBatch, restockCraft, trainPlan, trainCands, acquireMs, nextBatch, trainEstimate, fmtDur, Astro, Farm, farmSkills, farmFights, farmPlan, fightSafety, monsterMaxHit, dropPerKill, isFarmItem, farmHtml, astroCons, astroOptions, bestCon, astroHtml, isAstroItem,
       },
     };
     LOG("installed", VERSION);
