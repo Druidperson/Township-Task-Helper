@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.9.3
+- When the mod can't find where an item comes from, the step now has a "Look it up on the Melvor wiki" link that searches https://wiki.melvoridle.com/ for the item. The same link is in the note on manual queue steps.
+
 ## 0.9.2
 - XP tasks no longer suggest a method you can't actually feed. If the best XP per hour needs materials you can't get yet (the ore needs a Mining level you don't have, for example), it is skipped and the best method you can really do is picked. Materials count if they are in your bank or you have the levels to gather, craft, buy or farm them.
 
