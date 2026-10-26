@@ -1008,6 +1008,7 @@
     const { a } = cookShrimp();
     if (!a) skip("no Shrimp recipe");
     bankStub((id) => (id === "melvorD:Shrimp" ? 3 : 0)); // 3 cooked, the rest burned, no raw left
+    stub(skill("Cooking"), "getRecipeSuccessChance", () => 100); // the burn rate has its own tests
     const r = D().restockCraft(shrimpEntry());
     ok(r.ok, r.reason);
     eq(r.remaining, 7);
