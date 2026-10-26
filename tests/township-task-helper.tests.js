@@ -264,6 +264,9 @@
     ok(await waitFor(() => document.querySelector(".swal2-popup [data-mbd-wiki]"), 2000, 50), "link not in popup");
     ok(await popupReady(), "popup never finished opening"); // the click handler is attached when it opens
     const link = document.querySelector(".swal2-popup [data-mbd-wiki]");
+    const realHref = link.href;
+    has(realHref, "wiki.melvoridle.com");
+    link.setAttribute("href", "#tth-probe"); // harmless if the click isn't intercepted
     // the mod stops the click from bubbling, so watch preventDefault itself
     let intercepted = false;
     const realPrevent = Event.prototype.preventDefault;
@@ -272,7 +275,7 @@
     ok(intercepted, "the click wasn't intercepted, so the link would have changed the game's own tab");
     ok(args, "window.open wasn't called");
     eq(args[1], "_blank");
-    has(args[0], "wiki.melvoridle.com");
+    has(args[0], "#tth-probe", "the link's own address is what gets opened");
   }));
   test(B, "the popup has Add to queue, Add to top and Close in that order", () => sandbox(async () => {
     D().fire("t", () => "x", () => {});
