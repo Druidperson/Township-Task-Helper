@@ -3,7 +3,7 @@
 A mod for Melvor Idle that does two things:
 
 1. Shows you how to get whatever a Township task asks for.
-2. Gives you a saved activity queue, so the game can grind while you're away.
+2. Gives you a saved action queue, so the game can grind while you're away.
 
 ## Task breakdowns
 
@@ -13,11 +13,17 @@ For example, 300 Bronze Arrows turns into: mine copper and tin, smelt the bars, 
 
 For monsters, it shows where to find them and what gear you need to bring.
 
-## Activity queue
+For skill XP tasks, it shows the fastest XP method you can use at your current level and about how long it'll take. Queue it and the mod picks that method for you, and switches to a better one when you level up.
+
+## Action Queue
 
 Open the queue from the menu at the bottom right. From any breakdown you can add its steps to the queue, or add them to the top so they happen first.
 
 - Start, Pause and Stop controls
+- Combat tasks show the enemy's attack styles and weaknesses, your food, and an equipment set switcher
+- A setting to start the queue automatically when you add a task
+- Drag the panel anywhere, and a progress bar shows the estimated time left
+- A "Do this first" button on each row runs that entry now without moving it in the list
 - The queue works from top to bottom
 - It pauses and tells you why if you run out of materials
 - It waits on steps you have to do yourself (like getting an item from a monster)
@@ -33,7 +39,8 @@ https://mod.io/g/melvoridle/m/action-queue
 
 ## Known limits
 
-- Tested with Woodcutting, Mining and Smithing. Cooking, Fishing, Crafting, Herblore and Runecrafting should work but haven't been tested much.
+- XP ranking uses base XP per hour only. Mastery and other bonuses aren't counted.
+- Tested with Woodcutting, Mining, Smithing and Firemaking. Cooking, Fishing, Crafting, Herblore and Runecrafting should work but haven't been tested much.
 - The game has to stay open for the queue to run.
 - If an item has several recipes, the breakdown shows the first one.
 
