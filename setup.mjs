@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.11.0";
+  const VERSION = "0.11.1";
   const LOG = (...a) => console.log("[Township Task Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => String(o?.name ?? o?._name ?? o?._localID ?? o?.id ?? "?");
@@ -1597,7 +1597,13 @@ export function setup(ctx) {
       panel: Panel,
       runner: Runner,
       settings: Settings,
-      _dev: { itemMissing, areaMissing, missingHtml, reqText, trainPlan, trainCands, acquireMs, nextBatch, trainEstimate },
+      // internals exposed for the test suite in tests/
+      _dev: {
+        itemMissing, areaMissing, missingHtml, reqText, buildRows, toEntries, itemSection, sourceHtml, buyHtml, buyFromShop, wikiUrl,
+        monsterSection, foodHtml, setsHtml, describeGoal, entryKey, addUnique, dupHtml, tellPlayer, xpCandidates, xpSection, estimateMs,
+        startAction, startEntry, killEntry, areaFor, obtainable, fire, openTrain, trainBuild, trainQueue, TS,
+        trainPlan, trainCands, acquireMs, nextBatch, trainEstimate, fmtDur,
+      },
     };
     LOG("installed", VERSION);
   };

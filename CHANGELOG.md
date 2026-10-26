@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.11.1
+- No change for players. Adds a test suite (see the tests folder) and the hooks it needs.
+
 ## 0.11.0
 - New: train a skill without a Township task. The new button next to the queue button (chart icon) opens a planner for Woodcutting, Mining, Fishing, Cooking, Smithing, Fletching, Runecrafting and the other skills the queue can run.
 - Make an item: pick the item and an amount. The queue gathers and crafts everything it needs, using what is already in your bank, and makes the full amount even if you already own some.
