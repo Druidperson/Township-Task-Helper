@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.0
+- New: train a skill without a Township task. The new button next to the queue button (chart icon) opens a planner for Woodcutting, Mining, Fishing, Cooking, Smithing, Fletching, Runecrafting and the other skills the queue can run.
+- Make an item: pick the item and an amount. The queue gathers and crafts everything it needs, using what is already in your bank, and makes the full amount even if you already own some.
+- Train to a level: pick a target level and the queue trains until you get there. By default it uses the best method open to you, or you can choose one. Methods are ranked by XP per hour including the time it takes to gather their materials, so it won't farm a mountain of materials for little XP. It switches method only when a clearly better one opens up.
+- The queue plans one batch at a time, so it always uses your real level and bank, and it stops each batch the moment you hit the level.
+- Optional "Sell the items it makes" for level goals.
+- Queue items for level goals show your level and what the queue is doing now.
+
 ## 0.10.1
 - The wiki link now always opens in a new tab and never changes the game's own tab. If the browser blocks the new tab, the link is copied instead.
 

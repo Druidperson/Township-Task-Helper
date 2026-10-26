@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.10.1";
+  const VERSION = "0.11.0";
   const LOG = (...a) => console.log("[Township Task Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => String(o?.name ?? o?._name ?? o?._localID ?? o?.id ?? "?");
@@ -190,9 +190,9 @@ export function setup(ctx) {
     }
     return out;
   };
-  const itemMissing = (item, qty) => {
+  const itemMissing = (item, qty, fresh = false) => {
     const out = [];
-    for (const n of buildRows(item, qty)) {
+    for (const n of buildRows(item, qty, fresh)) {
       if (n.recipe) {
         const { c } = n.recipe;
         if ((c.a.level ?? 1) > c.skill.level) out.push({ text: `${c.a.level} ${nm(c.skill)}`, forName: nm(n.item) });
@@ -213,7 +213,7 @@ export function setup(ctx) {
     miss.map((x) => `<div class="mbd-chips">${chip(`<i class="fa fa-exclamation-triangle"></i>&nbsp;Warning: ${esc(x.text)} required for ${esc(x.forName)}`, "warn")}</div>`).join("") +
     `<div class="mbd-note">You can't queue this until you meet the requirements.</div></div>`;
 
-  const buildRows = (item, qty) => {
+  const buildRows = (item, qty, fresh = false) => {
     buildIndex();
     const nodes = new Map();
     explode(item, qty, 0, new Set(), nodes);
@@ -223,9 +223,11 @@ export function setup(ctx) {
     for (const n of [...nodes.values()].sort((a, b) => a.depth - b.depth)) {
       const need = demand.get(n.item.id) ?? 0;
       if (need <= 0) continue;
-      const owned = have(n.item) ?? 0;
+      const isRoot = fresh && n.item.id === item.id;
+      const owned = isRoot ? 0 : have(n.item) ?? 0;
       const make = Math.max(0, need - owned);
       n.need = need;
+      n.fresh = isRoot;
       n.qty = make;
       if (n.recipe) {
         const { c, opt } = n.recipe;
@@ -243,12 +245,12 @@ export function setup(ctx) {
     return rows.sort((a, b) => b.depth - a.depth || nm(a.item).localeCompare(nm(b.item)));
   };
 
-  const itemSection = (item, qty) => {
-    const rows = buildRows(item, qty);
+  const itemSection = (item, qty, fresh = false) => {
+    const rows = buildRows(item, qty, fresh);
     if (!rows.length) return `<div class="mbd-step"><div class="mbd-chips">${chip(`<i class="fa fa-check"></i> You already have enough in your bank`, "ok")}</div></div>`;
     return rows.map((n, i) => {
       const owned = have(n.item);
-      const haveChip = owned === null ? "" : chip(`You have ${num(owned)}${n.need !== undefined ? ` of ${num(n.need)} needed` : ""}`);
+      const haveChip = owned === null || n.fresh ? "" : chip(`You have ${num(owned)}${n.need !== undefined ? ` of ${num(n.need)} needed` : ""}`);
       let title, chips;
       if (n.recipe) {
         const { c, opt, crafts } = n.recipe;
@@ -399,7 +401,7 @@ export function setup(ctx) {
       try { game.shop.buyItemOnClick(p, true); } finally { game.shop.buyQuantity = old; }
     } catch (e) { console.warn("[Township Task Helper] buy failed", e); }
   };
-  const fire = (title, body, onQueue) => {
+  const fire = (title, body, onQueue, hooks) => {
     const bodyFn = typeof body === "function" ? body : () => body;
     const res = SwalLocale.fire({
       title,
@@ -412,6 +414,7 @@ export function setup(ctx) {
       // same shape and size as the Close button (btn btn-primary m-1), different colours
       customClass: { confirmButton: "btn btn-primary m-1", denyButton: "btn btn-success m-1", cancelButton: "btn btn-warning m-1" },
       didOpen: (popup) => {
+        try { hooks?.didOpen?.(popup); } catch (e) { console.warn("[Township Task Helper]", e); }
         const acts = popup?.querySelector?.(".swal2-actions");
         if (acts) Object.assign(acts.style, { display: "flex", justifyContent: "center", alignItems: "center", gap: "5px", flexWrap: "nowrap", margin: "1em auto 0" });
         // order: Add to queue, Add to top, Close
@@ -488,6 +491,12 @@ export function setup(ctx) {
     add(entries, top = false) {
       const fresh = entries.map((e) => ({ ...e, id: uid(), status: "pending" }));
       this.items = top ? [...fresh, ...this.items] : [...this.items, ...fresh];
+      this.save();
+    },
+    insertBefore(id, entries) {
+      const fresh = entries.map((e) => ({ ...e, id: uid(), status: "pending" }));
+      const i = this.items.findIndex((e) => e.id === id);
+      if (i < 0) this.items.push(...fresh); else this.items.splice(i, 0, ...fresh);
       this.save();
     },
     remove(id) { this.items = this.items.filter((e) => e.id !== id); this.save(); },
@@ -718,9 +727,10 @@ export function setup(ctx) {
     const opt = options(a)[e.altIndex ?? 0];
     return ms / Math.max(1, (a.baseQuantity ?? 1) * (opt?.mult ?? 1));
   };
-  const remainingUnits = (e) => (e.kind === "combat" ? Math.max(0, e.targetKills - Runner.gained(e)) : e.kind === "xp" ? Math.max(0, e.targetXp - (skillById(e.skillId)?.xp ?? 0)) : Math.max(0, e.qty - Runner.gained(e)));
+  const remainingUnits = (e) => (e.kind === "combat" ? Math.max(0, e.targetKills - Runner.gained(e)) : (e.kind === "xp" || e.kind === "train") ? Math.max(0, e.targetXp - (skillById(e.skillId)?.xp ?? 0)) : Math.max(0, e.qty - Runner.gained(e)));
   const estimateMs = (e) => {
     if (e.kind === "manual" || e.status === "done") return 0;
+    if (e.kind === "train") return trainEstimate(e);
     const units = remainingUnits(e);
     if (units <= 0) return 0;
     let per = msPerUnit(e);
@@ -776,7 +786,7 @@ export function setup(ctx) {
     },
     gained(e) {
       if (e.kind === "combat") { const c = killCount(e); return e.rel ? Math.max(0, c - (e.k0 ?? c)) : c; }
-      if (e.kind === "xp") return Math.floor(skillById(e.skillId)?.xp ?? 0);
+      if (e.kind === "xp" || e.kind === "train") return Math.floor(skillById(e.skillId)?.xp ?? 0);
       if (e.startQty === undefined) return 0;
       return Math.max(0, (have(itemById(e.itemId)) ?? 0) - e.startQty);
     },
@@ -833,16 +843,16 @@ export function setup(ctx) {
     },
     sellExtra(entry) {
       try {
-        if (!Settings.autoSell() || (entry.kind !== "craft" && entry.kind !== "gather") || entry.startQty === undefined) return;
+        if ((!Settings.autoSell() && !entry.sellAll) || (entry.kind !== "craft" && entry.kind !== "gather") || entry.startQty === undefined) return;
         const item = itemById(entry.itemId);
         if (!item || !(item.sellsFor?.quantity > 0)) return;
         const bi = game.bank.items.get(item);
         if (!bi || bi.locked) return;
-        const extra = Math.min(bi.quantity, bi.quantity - entry.startQty - entry.qty);
+        const extra = Math.min(bi.quantity, bi.quantity - entry.startQty - (entry.sellAll ? 0 : entry.qty));
         if (!(extra >= 1)) return;
         const price = game.bank.getItemSalePrice(item, extra);
         game.bank.processItemSale(item, extra);
-        entry.sold = `Sold ${extra.toLocaleString()} extra for ${price.toLocaleString()} ${nm(item.sellsFor.currency)}`;
+        entry.sold = `Sold ${extra.toLocaleString()}${entry.sellAll ? "" : " extra"} for ${price.toLocaleString()} ${nm(item.sellsFor.currency)}`;
       } catch (e) { console.warn("[Township Task Helper] auto-sell", e); }
     },
     finish(entry) {
@@ -864,6 +874,22 @@ export function setup(ctx) {
       for (let guard = 0; guard < 100; guard++) {
         const cur = this.current();
         if (!cur) { this.leave(); this.setState("idle", "Queue finished"); return; }
+
+        // a "train to level" entry never runs itself: it works out the next batch of steps, puts them above itself, and comes back
+        if (cur.kind === "train") {
+          const sk = skillById(cur.skillId);
+          if (!sk || sk.level >= cur.targetLevel) { this.finish(cur); continue; }
+          const xpNow = Math.floor(sk.xp ?? 0);
+          if (cur.lastXp !== undefined && xpNow <= cur.lastXp) cur.stall = (cur.stall ?? 0) + 1; else cur.stall = 0;
+          cur.lastXp = xpNow;
+          if (cur.stall >= 2) { this.block(cur, "training isn't giving any XP, so the plan stopped. Check the steps above it"); return; }
+          const nb = nextBatch(cur);
+          if (!nb.ok) { this.block(cur, nb.reason); return; }
+          cur.now = nb.note;
+          cur.afterLevel = nb.to;
+          Queue.insertBefore(cur.id, nb.entries);
+          continue;
+        }
 
         // a different entry is now on top (we just started, or something was added above): switch to it
         if (this.activeId !== cur.id) {
@@ -928,6 +954,10 @@ export function setup(ctx) {
           return;
         }
 
+        if (cur.untilLevel) {
+          const us = skillById(cur.untilSkill ?? cur.skillId);
+          if (us && us.level >= cur.untilLevel) { this.finish(cur); continue; }
+        }
         if (owned - (cur.startQty ?? 0) >= cur.qty) { this.finish(cur); continue; }
 
         const skill = skillById(cur.skillId);
@@ -942,6 +972,253 @@ export function setup(ctx) {
         return;
       }
     },
+  };
+
+  // ---------- train a skill (no Township task needed) ----------
+  // Two goals: make an amount of an item, or train to a level. A level goal never farms blindly: every method is ranked
+  // by XP per hour of ALL the work it takes (gathering its materials included), and the plan only switches method when a
+  // clearly better one opens up. The queue plans one batch at a time, so it always uses your real level and bank.
+  const TRAINABLE = new Set([
+    "melvorD:Woodcutting", "melvorD:Mining", "melvorD:Fishing", "melvorD:Cooking", "melvorD:Smithing",
+    "melvorD:Fletching", "melvorD:Crafting", "melvorD:Runecrafting", "melvorD:Herblore",
+  ]);
+  const isTrainable = (s) => !!s && TRAINABLE.has(s.id);
+  const levelIn = (skill, lv) => (lv && lv.has(skill.id) ? lv.get(skill.id) : skill.level);
+  const xpAt = (l) => { try { return exp.level_to_xp(l); } catch (e) { return 0; } };
+  const levelCapFor = (s) => (s.level >= 99 ? 120 : 99);
+  const SWITCH_GAIN = 1.1; // keep the current method unless another is at least 10% faster, so plans don't split into tiny batches
+
+  // time (ms) to get n of an item from scratch with things the queue can do itself; Infinity if it can't
+  // also returns the XP those steps give in `skillId` (smelting bars trains Smithing too)
+  const acquire = (item, n, lv, skillId, seen = new Set(), depth = 0) => {
+    if (!(n > 0)) return { ms: 0, xp: 0 };
+    buildIndex();
+    const NO = { ms: Infinity, xp: 0 };
+    if (depth > 10 || seen.has(item.id)) return NO;
+    const c = idx.crafters.get(item.id)?.[0];
+    if (c) {
+      if (!isTrainable(c.skill) || (c.a.level ?? 1) > levelIn(c.skill, lv)) return NO;
+      const opt = options(c.a)[0];
+      const per = Math.max(1, (c.a.baseQuantity ?? 1) * opt.mult);
+      const crafts = n / per; // not rounded up: this ranks methods by their steady rate
+      let ms = crafts * intervalMs(c.skill, c.a), xp = c.skill.id === skillId ? crafts * (c.a.baseExperience ?? 0) : 0;
+      seen.add(item.id);
+      for (const k of [...baseCosts(c.a), ...opt.costs]) {
+        if (!k?.item) continue;
+        const r = acquire(k.item, k.quantity * crafts, lv, skillId, seen, depth + 1);
+        ms += r.ms; xp += r.xp;
+      }
+      seen.delete(item.id);
+      return { ms, xp };
+    }
+    const g = idx.gatherers.get(item.id)?.[0];
+    if (!g || !isTrainable(g.skill) || (g.a.level ?? 1) > levelIn(g.skill, lv)) return NO;
+    const acts = n / Math.max(1, g.a.baseQuantity ?? 1);
+    return { ms: acts * intervalMs(g.skill, g.a), xp: g.skill.id === skillId ? acts * (g.a.baseExperience ?? 0) : 0 };
+  };
+  const acquireMs = (item, n, lv) => acquire(item, n, lv, null).ms;
+  // the same step the queue would really run for this product (first crafter / first gatherer)
+  const stepFor = (a) => {
+    buildIndex();
+    const c = a.product && idx.crafters.get(a.product.id)?.[0];
+    const g = a.product && idx.gatherers.get(a.product.id)?.[0];
+    return c ? (c.a === a ? { craft: true } : null) : g && g.a === a ? { craft: false } : null;
+  };
+  // training methods open at this level, best first by XP per hour of everything they need
+  const trainCands = (skill, lv) => {
+    const out = [];
+    const L = levelIn(skill, lv);
+    for (const a of list(skill.actions)) {
+      if (a.realm && a.realm.id !== MELVOR_REALM) continue;
+      if ((a.level ?? 1) > L || !(a.baseExperience > 0) || !a.product) continue;
+      const st = stepFor(a);
+      if (!st) continue;
+      const opt = st.craft ? options(a)[0] : { costs: [], mult: 1 };
+      const per = Math.max(1, (a.baseQuantity ?? 1) * opt.mult);
+      let ms = intervalMs(skill, a), xpPer = a.baseExperience;
+      if (st.craft) for (const k of [...baseCosts(a), ...opt.costs]) if (k?.item) { const r = acquire(k.item, k.quantity, lv, skill.id); ms += r.ms; xpPer += r.xp; }
+      if (!isFinite(ms) || ms <= 0) continue;
+      out.push({ a, per, ms, xpPer, rate: (xpPer / ms) * 3600000 });
+    }
+    return out.sort((x, y) => y.rate - x.rate);
+  };
+  const trainPlan = (skill, target, forcedId, fromLevel = skill.level, fromXp = skill.xp ?? 0) => {
+    const sim = new Map();
+    const batches = [];
+    let L = fromLevel, cur = null, blocked = null;
+    for (let guard = 0; L < target && guard < 140; guard++) {
+      sim.set(skill.id, L);
+      let cands = trainCands(skill, sim);
+      if (forcedId) cands = cands.filter((c) => c.a.id === forcedId);
+      if (!cands.length) { blocked = L; break; }
+      let pick = cands[0];
+      if (cur) { const same = cands.find((c) => c.a === cur.c.a); if (same && pick.rate < same.rate * SWITCH_GAIN) pick = same; }
+      if (!cur || cur.c.a !== pick.a) { cur = { c: pick, from: L, to: L }; batches.push(cur); }
+      L++;
+      cur.to = L;
+    }
+    let total = 0, xpPrev = fromXp;
+    for (const b of batches) {
+      const startXp = Math.max(xpPrev, xpAt(b.from));
+      b.xpGain = Math.max(0, xpAt(b.to) - startXp);
+      b.actions = Math.max(1, Math.ceil(b.xpGain / b.c.xpPer));
+      b.ms = b.actions * b.c.ms;
+      total += b.ms;
+      xpPrev = xpAt(b.to);
+    }
+    return { batches, totalMs: total, blocked };
+  };
+  // the next batch of real queue steps for a "train" entry, planned from the player's level and bank right now
+  const nextBatch = (e) => {
+    const skill = skillById(e.skillId);
+    if (!skill) return { ok: false, reason: "this skill wasn't found in your game version" };
+    const plan = trainPlan(skill, e.targetLevel, e.forced);
+    if (!plan.batches.length) {
+      const fa = e.forced && actionById(skill, e.forced);
+      return { ok: false, reason: fa ? `${nm(fa)} can't be trained by the queue at level ${skill.level}` : `nothing at ${nm(skill)} level ${skill.level} can be trained by the queue on its own (it may need shop items or monster drops)` };
+    }
+    const b = plan.batches[0];
+    const actions = Math.max(1, Math.ceil((xpAt(b.to) - (skill.xp ?? 0)) / b.c.xpPer));
+    const item = b.c.a.product;
+    const rows = buildRows(item, actions * b.c.per, true);
+    const entries = toEntries(rows);
+    const last = entries[entries.length - 1];
+    if (!last || last.itemId !== item.id) return { ok: false, reason: "couldn't work out the steps" };
+    if (entries.some((x) => x.kind === "manual")) return { ok: false, reason: `${nm(item)} needs something the queue can't get on its own` };
+    Object.assign(last, { untilLevel: b.to, untilSkill: skill.id, sellAll: !!e.sellMade });
+    for (const x of entries) x.parent = e.id;
+    return { ok: true, entries, to: b.to, note: `${nm(b.c.a)} until level ${b.to} (about ${Math.round(b.c.rate).toLocaleString()} XP/h)` };
+  };
+  const estMemo = new Map();
+  const trainEstimate = (e) => {
+    const sk = skillById(e.skillId);
+    if (!sk) return null;
+    const fromL = e.afterLevel && e.afterLevel > sk.level ? e.afterLevel : sk.level;
+    const key = `${e.id}|${fromL}|${e.targetLevel}`;
+    if (estMemo.has(key)) return estMemo.get(key);
+    if (estMemo.size > 200) estMemo.clear();
+    const plan = trainPlan(sk, e.targetLevel, e.forced, fromL, fromL === sk.level ? (sk.xp ?? 0) : xpAt(fromL));
+    const ms = plan.blocked != null ? null : plan.totalMs;
+    estMemo.set(key, ms);
+    return ms;
+  };
+  const rowsMs = (rows) => rows.reduce((s, n) => {
+    if (n.recipe) return s + n.recipe.crafts * intervalMs(n.recipe.c.skill, n.recipe.c.a);
+    const g = idx.gatherers.get(n.item.id)?.[0];
+    return s + (g ? (n.qty * intervalMs(g.skill, g.a)) / Math.max(1, g.a.baseQuantity ?? 1) : 0);
+  }, 0);
+
+  // ----- the popup -----
+  const TS = { skillId: null, goal: "level", make: null, qty: 100, level: null, forced: "", sell: false };
+  const trainSkills = () => list(game.skills).filter(isTrainable);
+  const currentTrainSkill = () => { const s = skillById(game.openPage?.id); return isTrainable(s) ? s : trainSkills()[0]; };
+  const makeables = (skill) => { buildIndex(); return list(skill.actions).filter((a) => (!a.realm || a.realm.id === MELVOR_REALM) && a.product && stepFor(a)).sort((x, y) => (x.level ?? 1) - (y.level ?? 1)); };
+  const fixTrain = () => {
+    let sk = skillById(TS.skillId);
+    if (!isTrainable(sk)) { sk = currentTrainSkill(); TS.skillId = sk?.id ?? null; }
+    if (!sk) return;
+    const ms = makeables(sk);
+    if (!ms.some((a) => a.id === TS.make)) { const ok = ms.filter((a) => (a.level ?? 1) <= sk.level); TS.make = (ok.length ? ok[ok.length - 1] : ms[0])?.id ?? null; }
+    const cap = levelCapFor(sk);
+    if (!(TS.level > sk.level) || TS.level > cap) TS.level = Math.min(cap, Math.max(sk.level + 1, Math.ceil((sk.level + 1) / 10) * 10));
+    if (TS.forced && !trainCands(sk).some((c) => c.a.id === TS.forced)) TS.forced = "";
+  };
+  const opt = (v, l, sel) => `<option value="${esc(v)}"${sel ? " selected" : ""}>${esc(l)}</option>`;
+  const trainForm = () => {
+    const sk = skillById(TS.skillId);
+    const sel = (id, body) => `<select id="${id}" class="custom-select custom-select-sm">${body}</select>`;
+    let h = `<div class="mbd-form"><label>Skill</label>${sel("mbd-tr-skill", trainSkills().map((s) => opt(s.id, `${nm(s)} (level ${s.level})`, s.id === TS.skillId)).join(""))}` +
+      `<label>Goal</label>${sel("mbd-tr-goal", opt("level", "Train to a level", TS.goal === "level") + opt("make", "Make an amount of an item", TS.goal === "make"))}`;
+    if (TS.goal === "make") {
+      h += `<label>Item</label>${sel("mbd-tr-item", makeables(sk).map((a) => opt(a.id, `${nm(a.product)} (level ${a.level ?? 1}${(a.level ?? 1) > sk.level ? ", locked" : ""})`, a.id === TS.make)).join(""))}` +
+        `<label>Amount</label><input id="mbd-tr-qty" type="number" min="1" step="1" value="${TS.qty}" class="form-control form-control-sm">`;
+    } else {
+      h += `<label>Target level</label><input id="mbd-tr-level" type="number" min="${sk.level + 1}" max="${levelCapFor(sk)}" step="1" value="${TS.level}" class="form-control form-control-sm">` +
+        `<label>Method</label>${sel("mbd-tr-method", opt("", "Best available (recommended)", !TS.forced) + trainCands(sk).map((c) => opt(c.a.id, `${nm(c.a)} (about ${num(Math.round(c.rate))} XP/h)`, c.a.id === TS.forced)).join(""))}` +
+        `<label>Selling</label><label style="opacity:1"><input id="mbd-tr-sell" type="checkbox"${TS.sell ? " checked" : ""}> Sell the items it makes</label>`;
+    }
+    return h + `</div>`;
+  };
+  const trainBuild = () => {
+    const sk = skillById(TS.skillId);
+    if (!sk) return { html: `<div class="mbd-note">No trainable skill found.</div>`, entries: [], problem: "No trainable skill found." };
+    if (TS.goal === "make") {
+      const act = actionById(sk, TS.make);
+      const qty = Math.max(1, Math.floor(TS.qty || 0));
+      if (!act?.product) return { html: "", entries: [], problem: "Pick an item first." };
+      const item = act.product;
+      const miss = itemMissing(item, qty, true);
+      if (miss.length) return { html: missingHtml(miss), entries: [], problem: "You don't meet the requirements for that yet." };
+      const rows = buildRows(item, qty, true);
+      const entries = toEntries(rows);
+      const per = Math.max(1, (act.baseQuantity ?? 1) * (stepFor(act)?.craft ? options(act)[0].mult : 1));
+      const xp = Math.ceil(qty / per) * (act.baseExperience ?? 0);
+      const head = `<div class="mbd-step"><div class="mbd-title">${icon(item)}<b>Make ${num(qty)} ${esc(nm(item))}</b></div><div class="mbd-chips">` +
+        chip(`About ${fmtDur(rowsMs(rows))}`, "ok", "Base speed, counting what your bank already holds") + chip(`${num(xp)} ${esc(nm(sk))} XP`, "", "Base XP, before bonuses") + `</div></div>`;
+      return { html: dupHtml(entries) + head + itemSection(item, qty, true), entries };
+    }
+    const cap = levelCapFor(sk);
+    const L = Math.floor(TS.level || 0);
+    if (!(L > sk.level) || L > cap) {
+      const msg = sk.level >= cap ? `${nm(sk)} is already at its highest level.` : `Pick a target level between ${sk.level + 1} and ${cap}.`;
+      return { html: `<div class="mbd-note">${esc(msg)}</div>`, entries: [], problem: msg };
+    }
+    const plan = trainPlan(sk, L, TS.forced || null);
+    if (!plan.batches.length) {
+      const msg = "Nothing here can be trained by the queue on its own at your level (it may need shop items or monster drops).";
+      return { html: `<div class="mbd-step"><div class="mbd-chips">${chip(`<i class="fa fa-exclamation-triangle"></i>&nbsp;${esc(msg)}`, "warn")}</div></div>`, entries: [], problem: msg };
+    }
+    const entries = [{ kind: "train", skillId: sk.id, targetLevel: L, targetXp: xpAt(L), qty: xpAt(L), forced: TS.forced || undefined, sellMade: TS.sell, label: `${nm(sk)}: reach level ${L}` }];
+    let html = dupHtml(entries) + `<div class="mbd-step"><div class="mbd-title">${icon(sk)}<b>${esc(nm(sk))}: level ${sk.level} to ${L}</b></div><div class="mbd-chips">` +
+      chip(`${num(Math.max(0, Math.ceil(xpAt(L) - (sk.xp ?? 0))))} XP to go`) +
+      (plan.blocked == null ? chip(`About ${fmtDur(plan.totalMs)}`, "ok", "Base speeds, gathering the materials included") : chip(`Plan covers up to level ${plan.blocked}`, "warn")) + `</div></div>`;
+    html += plan.batches.map((b, i) => {
+      const a = b.c.a;
+      const st = stepFor(a);
+      const uses = st?.craft ? [...baseCosts(a), ...options(a)[0].costs].filter((k) => k?.item).map((k) => chip(`${icon(k.item)}${num(k.quantity)} ${esc(nm(k.item))}`)).join("") : "";
+      return `<div class="mbd-step"><div class="mbd-stepno">${i === 0 ? "Starting at" : "Then at"} level ${b.from}${b.to > b.from ? ` (to ${b.to})` : ""}</div>` +
+        `<div class="mbd-title">${icon(a.product)}<b>${esc(nm(a))}</b></div><div class="mbd-chips">${chip(`${num(Math.round(b.c.rate))} XP/hour`, "", "Counting the time to gather or make what it needs")}${chip(`About ${fmtDur(b.ms)}`)}</div>` +
+        (uses ? `<div class="mbd-chips">${chip("<b>Each uses</b>", "lbl")}${uses}</div>` : "") + `</div>`;
+    }).join("");
+    let skipped = false;
+    if (!TS.forced) {
+      const okIds = new Set(trainCands(sk).map((c) => c.a.id));
+      skipped = list(sk.actions).some((a) => (a.level ?? 1) <= sk.level && a.baseExperience > 0 && a.product && !okIds.has(a.id) && xpRate(sk, a) > plan.batches[0].c.rate);
+    }
+    html += `<div class="mbd-note">Methods are ranked by XP per hour including the time to gather what they need, so it won't farm a mountain of materials for little XP. The queue re-checks your level and bank after every batch.` +
+      (skipped ? ` Some faster methods are left out because their materials need higher levels in other skills, or come from the shop or monsters.` : "") + `</div>`;
+    return { html, entries };
+  };
+  const trainBody = () => `<div id="mbd-tr-form">${trainForm()}</div><div id="mbd-tr-prev">${trainBuild().html}</div>`;
+  const trainQueue = (top) => {
+    const b = trainBuild();
+    if (!b.entries.length) { tellPlayer(b.problem || "Nothing to add."); return; }
+    const added = addUnique(b.entries, top);
+    Panel.open();
+    if (added && Settings.autoStart() && Runner.state !== "running") Runner.start();
+  };
+  const onTrainEvent = (popup, ev) => {
+    const el = ev.target, id = el?.id ?? "";
+    if (!id.startsWith("mbd-tr-")) return;
+    if (ev.type === "input" && (el.tagName === "SELECT" || el.type === "checkbox")) return;
+    if (id === "mbd-tr-skill") { TS.skillId = el.value; TS.make = null; TS.level = null; TS.forced = ""; fixTrain(); popup.querySelector("#mbd-tr-form").innerHTML = trainForm(); }
+    else if (id === "mbd-tr-goal") { TS.goal = el.value; fixTrain(); popup.querySelector("#mbd-tr-form").innerHTML = trainForm(); }
+    else if (id === "mbd-tr-item") TS.make = el.value;
+    else if (id === "mbd-tr-qty") TS.qty = Math.max(1, Math.floor(Number(el.value) || 1));
+    else if (id === "mbd-tr-level") TS.level = Math.floor(Number(el.value) || 0);
+    else if (id === "mbd-tr-method") TS.forced = el.value;
+    else if (id === "mbd-tr-sell") TS.sell = el.checked;
+    const prev = popup.querySelector("#mbd-tr-prev");
+    if (prev) prev.innerHTML = trainBuild().html;
+  };
+  const openTrain = () => {
+    const cur = currentTrainSkill();
+    if (!cur) return;
+    TS.skillId = cur.id; TS.make = null; TS.level = null; TS.forced = "";
+    fixTrain();
+    fire("Train a skill", trainBody, trainQueue, {
+      didOpen: (popup) => { for (const t of ["input", "change"]) popup.addEventListener(t, (ev) => onTrainEvent(popup, ev)); },
+    });
   };
 
   // ---------- floating panel ----------
@@ -1022,7 +1299,8 @@ export function setup(ctx) {
       return el;
     },
     row(e) {
-      const isXp = e.kind === "xp";
+      const isTrain = e.kind === "train";
+      const isXp = e.kind === "xp" || isTrain;
       const isCombat = e.kind === "combat";
       const item = isXp ? skillById(e.skillId) : isCombat ? game.monsters.getObjectByID(e.monsterId) : itemById(e.itemId);
       const manual = e.kind === "manual";
@@ -1034,12 +1312,13 @@ export function setup(ctx) {
         : warn ? '<i class="fa fa-exclamation-triangle text-warning mr-2"></i>'
         : '<i class="fa fa-circle mr-2" style="opacity:.25;font-size:8px;vertical-align:middle"></i>';
       const showProgress = !manual && !done && (isXp || isCombat || (e.startQty !== undefined && (e.status === "active" || e.status === "blocked" || Runner.gained(e) > 0)));
-      const amount = isCombat ? `<b>${Runner.gained(e).toLocaleString()} / ${Number(e.targetKills).toLocaleString()} kills</b>` : isXp ? `<b>${Runner.gained(e).toLocaleString()} / ${Number(e.targetXp).toLocaleString()} XP</b>` : showProgress ? `<b>${Runner.gained(e).toLocaleString()} / ${Number(e.qty).toLocaleString()}</b>` : `<b>x${Number(e.qty).toLocaleString()}</b>`;
+      const amount = isCombat ? `<b>${Runner.gained(e).toLocaleString()} / ${Number(e.targetKills).toLocaleString()} kills</b>` : isTrain ? `<b>Level ${(skillById(e.skillId)?.level ?? 0)} / ${e.targetLevel}</b>` : isXp ? `<b>${Runner.gained(e).toLocaleString()} / ${Number(e.targetXp).toLocaleString()} XP</b>` : showProgress ? `<b>${Runner.gained(e).toLocaleString()} / ${Number(e.qty).toLocaleString()}</b>` : `<b>x${Number(e.qty).toLocaleString()}</b>`;
       const btn = (act, ic, title) =>
         `<a data-act="${act}" data-id="${esc(e.id)}" class="pointer-enabled text-white-50 ml-2" title="${title}"><i class="fa ${ic}"></i></a>`;
       const sub = done && e.sold ? `<br><small class="text-muted">${esc(e.sold)}</small>`
         : e.reason ? `<br><small class="text-warning">${esc(e.reason)}</small>`
         : issue ? `<br><small class="text-warning"><i class="fa fa-exclamation-triangle"></i> ${esc(issue)}</small>`
+        : isTrain && e.now && !done ? `<br><small class="text-muted">now: ${esc(e.now)}</small>`
         : isXp && e.status === "active" && e.method ? `<br><small class="text-muted">using ${esc(e.method)}</small>`
         : manual && !done ? `<br><small class="text-muted">do this yourself${e.status === "waiting" ? " (waiting for you)" : ""}</small>` : "";
       return (
@@ -1125,13 +1404,23 @@ export function setup(ctx) {
       bar.appendChild(b);
       updateBadge();
     }
-    const ref = [...bar.children].find((c) => c !== b && c.offsetWidth > 0);
-    if (ref) { b.style.width = ref.offsetWidth + "px"; b.style.height = ref.offsetHeight + "px"; }
+    let tb = document.getElementById("mbd-train-btn");
+    if (!tb) {
+      tb = document.createElement("button");
+      tb.className = "btn btn-sm btn-light";
+      tb.id = "mbd-train-btn";
+      tb.title = "Train a skill: queue an item or a level goal";
+      tb.innerHTML = '<i class="fa fa-chart-line text-dark" style="display:inline-block;width:24px;height:24px;line-height:24px;font-size:16px;text-align:center;vertical-align:middle"></i>';
+      tb.addEventListener("click", () => { try { openTrain(); } catch (e) { console.warn("[Township Task Helper]", e); } tb.blur(); });
+      bar.insertBefore(tb, b);
+    }
+    const ref = [...bar.children].find((c) => c !== b && c !== tb && c.offsetWidth > 0);
+    if (ref) for (const x of [b, tb]) { x.style.width = ref.offsetWidth + "px"; x.style.height = ref.offsetHeight + "px"; }
   };
 
   // ---------- goal -> popup ----------
   // ---------- duplicates ----------
-  const entryKey = (e) => `${e.kind}|${e.itemId ?? e.monsterId ?? e.skillId ?? ""}|${e.actionId ?? ""}|${e.targetXp ?? ""}`;
+  const entryKey = (e) => `${e.kind}|${e.itemId ?? e.monsterId ?? e.skillId ?? ""}|${e.actionId ?? e.forced ?? ""}|${e.targetXp ?? ""}`;
   const queuedKeys = () => new Set(Queue.items.filter((x) => x.status !== "done").map(entryKey));
   const dupHtml = (entries) => {
     if (!entries?.length) return "";
@@ -1269,6 +1558,9 @@ export function setup(ctx) {
       .mbd-place{margin:3px 0;font-size:13px}
       .mbd-place img{width:18px;height:18px;margin-right:4px;vertical-align:middle}
       .mbd-note{margin-top:8px;font-size:12px;opacity:.7}
+      .mbd-form{display:grid;grid-template-columns:120px 1fr;gap:6px 10px;align-items:center;text-align:left;margin:0 0 10px}
+      .mbd-form label{margin:0;font-size:13px;opacity:.85}
+      .mbd-form select,.mbd-form input[type=number]{width:100%}
     `;
     document.head.appendChild(st);
   };
@@ -1305,7 +1597,7 @@ export function setup(ctx) {
       panel: Panel,
       runner: Runner,
       settings: Settings,
-      _dev: { itemMissing, areaMissing, missingHtml, reqText },
+      _dev: { itemMissing, areaMissing, missingHtml, reqText, trainPlan, trainCands, acquireMs, nextBatch, trainEstimate },
     };
     LOG("installed", VERSION);
   };
