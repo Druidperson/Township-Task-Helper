@@ -1,10 +1,10 @@
-// Township Helper: task breakdowns + action queue for Melvor Idle
+// Township Task Helper: task breakdowns + action queue for Melvor Idle
 export function setup(ctx) {
 (() => {
   "use strict";
 
   const VERSION = "0.10.1";
-  const LOG = (...a) => console.log("[Township Helper]", ...a);
+  const LOG = (...a) => console.log("[Township Task Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => String(o?.name ?? o?._name ?? o?._localID ?? o?.id ?? "?");
   const esc = (s) =>
@@ -28,7 +28,7 @@ export function setup(ctx) {
       return KEYS[name][1];
     },
     set(name, v) {
-      try { if (this.api) this.api.set(name, !!v); } catch (e) { console.warn("[Township Helper] settings", e); }
+      try { if (this.api) this.api.set(name, !!v); } catch (e) { console.warn("[Township Task Helper] settings", e); }
       try { localStorage.setItem(KEYS[name][0], v ? "1" : "0"); } catch (e) { /* ignore */ }
     },
     autoStart() { return this.get("autoStart"); },
@@ -53,7 +53,7 @@ export function setup(ctx) {
         default: true,
       });
       Settings.api = section;
-    } catch (e) { console.warn("[Township Helper] could not register settings", e); }
+    } catch (e) { console.warn("[Township Task Helper] could not register settings", e); }
   }
   const itemById = (id) => { try { return game.items.getObjectByID(id); } catch (e) { return null; } };
   const skillById = (id) => list(game.skills).find((s) => s.id === id);
@@ -80,7 +80,7 @@ export function setup(ctx) {
       for (const p of list(game.shop?.purchases)) {
         for (const c of p.contains?.items ?? []) if (c?.item) push(idx.shop, c.item.id, p);
       }
-    } catch (e) { console.warn("[Township Helper] shop index failed", e); }
+    } catch (e) { console.warn("[Township Task Helper] shop index failed", e); }
     return idx;
   };
 
@@ -170,7 +170,7 @@ export function setup(ctx) {
       const label = `<i class="fa fa-shopping-cart mr-1"></i>Buy ${num(n * per)} ${esc(nm(itemById(id)))} for ${parts.join(" + ")}`;
       return `<div class="mbd-chips"><button type="button" class="btn btn-sm ${ok ? "btn-success" : "btn-outline-secondary"}" data-mbd-buy="${esc(p.id)}" data-n="${n}"${ok ? "" : " disabled"}>${label}</button></div>` +
         (ok ? "" : `<div class="mbd-chips">${chip("You can't afford this yet, or it's locked", "warn")}</div>`);
-    } catch (e) { console.warn("[Township Helper] shop button", e); return ""; }
+    } catch (e) { console.warn("[Township Task Helper] shop button", e); return ""; }
   };
 
   const reqText = (r) => {
@@ -331,7 +331,7 @@ export function setup(ctx) {
   const switchSet = (i) => {
     const pl = game.combat?.player;
     setMsg = "";
-    try { pl.changeEquipmentSet(i); } catch (e) { console.warn("[Township Helper]", e); }
+    try { pl.changeEquipmentSet(i); } catch (e) { console.warn("[Township Task Helper]", e); }
     if (pl && pl.selectedEquipmentSet !== i) setMsg = "Couldn't switch sets right now (you may be in combat, or the set has a restriction).";
   };
   const setsHtml = () => {
@@ -397,7 +397,7 @@ export function setup(ctx) {
       const old = game.shop.buyQuantity;
       game.shop.buyQuantity = n;
       try { game.shop.buyItemOnClick(p, true); } finally { game.shop.buyQuantity = old; }
-    } catch (e) { console.warn("[Township Helper] buy failed", e); }
+    } catch (e) { console.warn("[Township Task Helper] buy failed", e); }
   };
   const fire = (title, body, onQueue) => {
     const bodyFn = typeof body === "function" ? body : () => body;
@@ -462,7 +462,7 @@ export function setup(ctx) {
         try {
           if (r?.isDenied) onQueue(false);
           else if (r?.dismiss === "cancel") onQueue(true);
-        } catch (e) { console.warn("[Township Helper]", e); }
+        } catch (e) { console.warn("[Township Task Helper]", e); }
       });
     }
   };
@@ -481,7 +481,7 @@ export function setup(ctx) {
       updateBadge();
     },
     save() {
-      try { localStorage.setItem(this.key(), JSON.stringify(this.items)); } catch (e) { console.warn("[Township Helper] could not save queue", e); }
+      try { localStorage.setItem(this.key(), JSON.stringify(this.items)); } catch (e) { console.warn("[Township Task Helper] could not save queue", e); }
       updateBadge();
       Panel.render();
     },
@@ -782,7 +782,7 @@ export function setup(ctx) {
     },
     haltAction() {
       const s = this.activeSkillId === "combat" ? game.combat : this.activeSkillId ? skillById(this.activeSkillId) : null;
-      try { if (s && game.activeAction === s) game.stopActiveAction(); } catch (e) { console.warn("[Township Helper]", e); }
+      try { if (s && game.activeAction === s) game.stopActiveAction(); } catch (e) { console.warn("[Township Task Helper]", e); }
     },
     leave() {
       if (this.activeId === null) return;
@@ -843,7 +843,7 @@ export function setup(ctx) {
         const price = game.bank.getItemSalePrice(item, extra);
         game.bank.processItemSale(item, extra);
         entry.sold = `Sold ${extra.toLocaleString()} extra for ${price.toLocaleString()} ${nm(item.sellsFor.currency)}`;
-      } catch (e) { console.warn("[Township Helper] auto-sell", e); }
+      } catch (e) { console.warn("[Township Task Helper] auto-sell", e); }
     },
     finish(entry) {
       this.sellExtra(entry);
@@ -851,7 +851,7 @@ export function setup(ctx) {
       delete entry.reason;
       delete entry.started;
       const s = entry.kind === "combat" ? game.combat : skillById(entry.skillId);
-      try { if (s && game.activeAction === s) game.stopActiveAction(); } catch (e) { console.warn("[Township Helper]", e); }
+      try { if (s && game.activeAction === s) game.stopActiveAction(); } catch (e) { console.warn("[Township Task Helper]", e); }
       this.activeId = null;
       this.activeSkillId = null;
       Queue.save();
@@ -1144,7 +1144,7 @@ export function setup(ctx) {
       `<div class="mbd-note">${all ? "Adding it again does nothing." : "Those steps will be skipped, the rest are added."}</div></div>`;
   };
   const tellPlayer = (msg) => {
-    try { notifyPlayer(game.township ?? game.attack, msg, "info"); } catch (e) { console.log("[Township Helper]", msg); }
+    try { notifyPlayer(game.township ?? game.attack, msg, "info"); } catch (e) { console.log("[Township Task Helper]", msg); }
   };
   const addUnique = (entries, top) => {
     const seen = queuedKeys();
@@ -1231,7 +1231,7 @@ export function setup(ctx) {
           if (added && Settings.autoStart() && Runner.state !== "running") Runner.start();
         } : null;
         fire(info.title, () => dupHtml(info.queue?.()) + info.body(), onQueue);
-      } catch (e) { console.warn("[Township Helper]", e); }
+      } catch (e) { console.warn("[Township Task Helper]", e); }
     });
     holder.appendChild(btn);
   };
@@ -1242,7 +1242,7 @@ export function setup(ctx) {
       const t = game.township.tasks;
       for (const task of list(t.tasks)) t.renderQueue.taskGoals.add(task);
       t.render();
-    } catch (e) { console.warn("[Township Helper] refresh failed", e); }
+    } catch (e) { console.warn("[Township Task Helper] refresh failed", e); }
   };
 
   const injectStyle = () => {
@@ -1280,14 +1280,14 @@ export function setup(ctx) {
     proto.__mbdOrig = orig;
     proto.setGoal = function (goal) {
       orig.call(this, goal);
-      try { decorate(this, goal); } catch (e) { console.warn("[Township Helper]", e); }
+      try { decorate(this, goal); } catch (e) { console.warn("[Township Task Helper]", e); }
     };
     Queue.load();
     mountButton();
     clearInterval(window.__mbdThTimer);
     window.__mbdThTimer = setInterval(mountButton, 2000); // the game can rebuild the menu; put our button back if it vanishes
     clearInterval(window.__mbdThRunTimer);
-    window.__mbdThRunTimer = setInterval(() => { try { Runner.step(); } catch (e) { console.warn("[Township Helper] runner", e); } }, 1000);
+    window.__mbdThRunTimer = setInterval(() => { try { Runner.step(); } catch (e) { console.warn("[Township Task Helper] runner", e); } }, 1000);
     refresh();
     window.townshipHelper = {
       version: VERSION,

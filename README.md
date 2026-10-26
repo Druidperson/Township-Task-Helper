@@ -1,6 +1,6 @@
-# Township Helper
+# Township Task Helper
 
-Township tasks take a lot of planning. Which ore, how many bars, which arrows, which monster, what level. Township Helper does the planning for you, then does the grinding too.
+Township tasks take a lot of planning. Which ore, how many bars, which arrows, which monster, what level. Township Task Helper does the planning for you, then does the grinding too.
 
 ## One click, full plan
 
