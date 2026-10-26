@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.1
+- Fixed: Township XP tasks no longer stop at "you don't have the materials". When the bank can't pay for the best method, the queue now adds the steps to get them first (mine the ore, chop the logs, smelt, craft) and then trains. It works a few levels at a time, so it keeps using your real level and bank.
+- The XP task popup lists what it will gather first.
+
 ## 0.13.0
 - New: items that only drop, like Bird Nest or Bones, now get a real plan instead of a "go get it yourself" step.
 - If a skill drops the item while you train it (Bird Nest from Woodcutting), the queue does that skill with the best XP per hour you can use, and moves up as you level.
