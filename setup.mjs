@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.12.0";
+  const VERSION = "0.13.0";
   const LOG = (...a) => console.log("[Township Task Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => String(o?.name ?? o?._name ?? o?._localID ?? o?.id ?? "?");
@@ -185,6 +185,139 @@ export function setup(ctx) {
       `<div class="mbd-note">Studying also levels the constellation's mastery. Pick one to train it on purpose, or take the best XP/hour and the queue switches to a better one when you level up.</div>`;
   };
 
+  // ---------- Farming an item that only drops ----------
+  // Bird Nest and friends are random drops. Order of preference: a skill that drops it while you train (best XP/hour),
+  // then a fight that is safe for you, then a risky fight only if the player says so. A Slayer task on a monster that drops
+  // the item is shown as an option because those kills count twice.
+  const Farm = { pick: {}, risk: {} };
+  const farmPick = (item) => Farm.pick[item.id] ?? "best";
+  const isFarmItem = (item) => {
+    if (!item) return false;
+    buildIndex();
+    if (idx.gatherers.get(item.id) || idx.crafters.get(item.id) || isAstroItem(item)) return false;
+    return !!(idx.randoms.get(item.id) || idx.droppers.get(item.id));
+  };
+  const farmSkills = (item) => {
+    buildIndex();
+    const out = [];
+    for (const x of idx.randoms.get(item.id) ?? []) {
+      if (x.skill.id === ASTRO_ID || (x.a.realm && x.a.realm.id !== MELVOR_REALM)) continue;
+      let chance = 0;
+      try { chance = Number(x.skill.getRandomProductInfo?.(item)?.chance ?? 0); } catch (e) { /* ignore */ }
+      if (!(chance > 0)) { try { chance = Number(x.skill.randomProducts?.get?.(item)?.chance ?? 0); } catch (e) { /* ignore */ } }
+      if (!(chance > 0)) continue;
+      const ms = intervalMs(x.skill, x.a);
+      out.push({ type: "skill", skill: x.skill, a: x.a, id: "s:" + x.a.id, open: (x.a.level ?? 1) <= x.skill.level, level: x.a.level ?? 1,
+        xpHr: ((x.a.baseExperience ?? 0) / ms) * 3600000, perHr: (3600000 / ms) * (chance / 100) });
+    }
+    return out.sort((a, b) => a.level - b.level);
+  };
+  const bestFarmSkill = (item) => farmSkills(item).filter((o) => o.open).sort((a, b) => b.xpHr - a.xpHr || b.perHr - a.perHr)[0] ?? null;
+  const nmult = () => (typeof numberMultiplier === "number" ? numberMultiplier : 10);
+  const stdMax = (lvl, b) => { const e = lvl + 9; return Math.floor(nmult() * (1.3 + e / 10 + b / 80 + (e * b) / 640)); };
+  // the hardest a monster's normal attack can hit (special attacks can hit harder)
+  const monsterMaxHit = (m) => {
+    try {
+      const lv = m.levels ?? {};
+      if (m.attackType === "melee") return stdMax(lv.Strength ?? 1, statVal(m, "meleeStrengthBonus"));
+      if (m.attackType === "ranged") return stdMax(lv.Ranged ?? 1, statVal(m, "rangedStrengthBonus"));
+      const sp = m.selectedSpell;
+      if (!sp) return null;
+      if (sp.spellbook && sp.spellbook.allowDamageModifiers === false) return Math.round(nmult() * sp.maxHit);
+      return Math.floor(nmult() * sp.maxHit * (1 + statVal(m, "magicDamageBonus") / 100) * (1 + ((lv.Magic ?? 1) + 1) / 200));
+    } catch (e) { return null; }
+  };
+  const playerGuard = () => {
+    const pl = game.combat?.player;
+    const hs = skillById("melvorD:Hitpoints");
+    const hp = pl?.stats?.maxHitpoints ?? nmult() * (hs?.level ?? 10);
+    const slot = pl?.food?.slots?.[pl.food.selectedSlot];
+    let heal = 0;
+    try { if (slot?.item) heal = pl.getFoodHealing(slot.item); } catch (e) { /* ignore */ }
+    return { hp, heal, food: slot?.item && slot.quantity > 0 ? nm(slot.item) : null, foodQty: slot?.quantity ?? 0 };
+  };
+  // safe = two max hits never kill you, and you either barely get scratched or your food out-heals an average hit
+  const fightSafety = (m) => {
+    const max = monsterMaxHit(m), g = playerGuard();
+    if (max === null) return { safe: false, max, avg: null, g, why: "can't tell how hard it hits" };
+    const avg = (1 + max) / 2;
+    if (max * 2 >= g.hp) return { safe: false, max, avg, g, why: `can hit for ${num(max)} against your ${num(g.hp)} HP` };
+    if (max <= g.hp * 0.15) return { safe: true, max, avg, g, why: `hits for ${num(max)} at most against your ${num(g.hp)} HP` };
+    if (g.food && g.heal >= avg) return { safe: true, max, avg, g, why: `average hit ${num(Math.round(avg))}, your ${g.food} heals ${num(Math.round(g.heal))}` };
+    return { safe: false, max, avg, g, why: g.food ? `average hit ${num(Math.round(avg))} but your ${g.food} heals only ${num(Math.round(g.heal))}` : `average hit ${num(Math.round(avg))} and no food equipped` };
+  };
+  const dropPerKill = (m, item) => {
+    let p = 0;
+    if (m.bones?.item?.id === item.id) p += Number(m.bones.quantity ?? 1);
+    const lt = m.lootTable, drops = lt?.drops ?? lt?._drops ?? [];
+    const tw = Number(lt?.totalWeight) || (Array.isArray(drops) ? drops.reduce((s, d) => s + (d.weight || 0), 0) : 0);
+    if (Array.isArray(drops) && tw > 0) for (const d of drops) if (d.item?.id === item.id) p += ((m.lootChance ?? 100) / 100) * (d.weight / tw) * (((d.minQuantity ?? 1) + (d.maxQuantity ?? 1)) / 2);
+    return p;
+  };
+  const slayerTaskNow = () => {
+    try { const t = game.combat?.slayerTask; return t?.active && t.monster && t.killsLeft > 0 ? t : null; } catch (e) { return null; }
+  };
+  const farmFights = (item) => {
+    buildIndex();
+    const task = slayerTaskNow();
+    const out = [];
+    for (const m of idx.droppers.get(item.id) ?? []) {
+      if (!areaFor(m)) continue;
+      const perKill = dropPerKill(m, item);
+      if (!(perKill > 0)) continue;
+      let open = true;
+      try { open = !areaMissing(m).length; } catch (e) { /* ignore */ }
+      out.push({ type: "fight", m, id: "m:" + m.id, open, perKill, safety: fightSafety(m), onTask: !!task && task.monster === m, taskLeft: task && task.monster === m ? task.killsLeft : 0 });
+    }
+    return out.sort((a, b) => b.open - a.open || b.safety.safe - a.safety.safe || b.onTask - a.onTask || b.perKill - a.perKill);
+  };
+  // what "best" means for this item right now
+  const farmPlan = (item) => {
+    const pick = farmPick(item);
+    const skills = farmSkills(item), fights = farmFights(item);
+    if (pick.startsWith("s:")) { const o = skills.find((x) => x.id === pick && x.open); if (o) return { opt: o, auto: false }; }
+    if (pick.startsWith("m:")) { const o = fights.find((x) => x.id === pick && x.open); if (o) return { opt: o, auto: false }; }
+    const s = bestFarmSkill(item);
+    if (s) return { opt: s, auto: true };
+    const okFights = fights.filter((f) => f.open);
+    const safe = okFights.filter((f) => f.safety.safe).sort((a, b) => b.onTask - a.onTask || b.perKill - a.perKill)[0];
+    if (safe) return { opt: safe, auto: true };
+    const risky = okFights.sort((a, b) => b.perKill - a.perKill)[0];
+    return risky ? { opt: risky, auto: true, risky: true } : { opt: null, auto: true };
+  };
+  const farmHtml = (item, qty) => {
+    const skills = farmSkills(item), fights = farmFights(item);
+    const plan = farmPlan(item), o = plan.opt;
+    if (!skills.length && !fights.length) return sourceHtml(item.id);
+    const label = (x) => x.type === "skill"
+      ? `${nm(x.skill)}: ${nm(x.a)} · ${num(Math.round(x.xpHr))} XP/h · about ${(x.perHr).toFixed(x.perHr < 10 ? 1 : 0)}/h${x.open ? "" : ` (needs level ${x.level})`}`
+      : `Fight ${nm(x.m)} · about ${num(Math.ceil(1 / x.perKill))} kills each · ${x.safety.safe ? "safe" : "risky"}${x.onTask ? " · your Slayer task" : ""}${x.open ? "" : " (area locked)"}`;
+    const cur = farmPick(item);
+    const autoTxt = !o ? "nothing you can do yet" : o.type === "skill" ? `${nm(o.skill)}, ${nm(o.a)} (best XP/hour)` : `fight ${nm(o.m)}${o.safety.safe ? " (safe for you)" : " (risky)"}`;
+    const sel = `<select data-mbd-farm="${esc(item.id)}" class="custom-select custom-select-sm" style="max-width:100%;width:auto">` +
+      `<option value="best"${cur === "best" ? " selected" : ""}>Automatic: ${esc(autoTxt)}</option>` +
+      (skills.length ? `<optgroup label="Skilling">${skills.map((x) => `<option value="${esc(x.id)}"${cur === x.id ? " selected" : ""}${x.open ? "" : " disabled"}>${esc(label(x))}</option>`).join("")}</optgroup>` : "") +
+      (fights.length ? `<optgroup label="Combat">${fights.map((x) => `<option value="${esc(x.id)}"${cur === x.id ? " selected" : ""}${x.open ? "" : " disabled"}>${esc(label(x))}</option>`).join("")}</optgroup>` : "") + `</select>`;
+    let html = `<div class="mbd-chips">${chip(`<i class="fa fa-dice"></i> <b>Random drop</b>`, "lbl")}${chip("Farm it while you train, or by fighting")}</div>` +
+      `<div class="mbd-row"><div class="mbd-rowlbl">How do you want to get it?</div><div class="mbd-chips">${sel}</div></div>`;
+    if (o && o.type === "skill") {
+      html += `<div class="mbd-chips">${chip(`${icon(o.skill)}${esc(nm(o.skill))}`)}${chip(esc(nm(o.a)))}${chip(`${num(Math.round(o.xpHr))} XP/hour`)}${chip(`About ${fmtDur((qty / o.perHr) * 3600000)}`, "ok", "Average, at base speed")}</div>` +
+        `<div class="mbd-note">You train ${esc(nm(o.skill))} while it drops. ${plan.auto ? "The queue moves to a better method when you level up." : ""}</div>`;
+    } else if (o) {
+      const kills = Math.ceil(qty / o.perKill);
+      html += `<div class="mbd-chips">${chip(`${esc(nm(o.m))}`)}${chip(`About ${num(kills)} kills`, "ok", "Average drop rate")}${chip(o.safety.safe ? "Safe for you" : "Risky for you", o.safety.safe ? "ok" : "warn", esc(o.safety.why))}</div>` +
+        `<div class="mbd-note">${esc(cap(o.safety.why))}.${o.safety.safe ? "" : " Special attacks can hit harder than this."}</div>`;
+      if (o.onTask) html += `<div class="mbd-chips">${chip(`<i class="fa fa-skull"></i> Your Slayer task: ${num(o.taskLeft)} left`, "ok", "These kills count toward it")}</div>`;
+      if (!o.safety.safe) html += `<label class="mbd-note" style="display:block"><input type="checkbox" data-mbd-risk="${esc(item.id)}"${Farm.risk[item.id] ? " checked" : ""}> I understand the risk, queue this fight anyway</label>`;
+    } else html += `<div class="mbd-note">Nothing you can do yet gives this item. ${lvlWarn(item.id)}</div>`;
+    const task = slayerTaskNow();
+    if (task && (!o || o.type !== "fight" || !o.onTask)) {
+      const f = fights.find((x) => x.onTask);
+      if (f) html += `<div class="mbd-chips">${chip(`<i class="fa fa-skull"></i> Your Slayer task (${esc(nm(f.m))}) drops this, pick it from the list to count both`, "", "")}</div>`;
+    }
+    return html;
+  };
+
   // ---------- breakdown rows -> popup html / queue entries ----------
   const lvlChip = (skill, a) =>
     skill && (a.level ?? 1) > skill.level
@@ -248,6 +381,7 @@ export function setup(ctx) {
       if (idx.shop.get(id)) continue;
       const opts = [...(idx.gatherers.get(id) ?? []), ...(idx.randoms.get(id) ?? [])];
       if (!opts.length || opts.some((x) => (x.a.level ?? 1) <= x.skill.level)) continue;
+      try { if (idx.droppers.get(id)?.some((m) => areaFor(m) && !areaMissing(m).length)) continue; } catch (e) { /* ignore */ }
       const best = opts.reduce((m, x) => ((x.a.level ?? 1) - x.skill.level < (m.a.level ?? 1) - m.skill.level ? x : m));
       out.push({ text: `${best.a.level ?? 1} ${nm(best.skill)}`, forName: nm(n.item) });
     }
@@ -309,7 +443,7 @@ export function setup(ctx) {
           (lvlChip(c.skill, c.a) ? `<div class="mbd-chips">${lvlChip(c.skill, c.a)}</div>` : "");
       } else {
         title = `${icon(n.item)}<b>${esc(nm(n.item))}</b> &times;${num(n.qty)}`;
-        chips = `<div class="mbd-chips">${haveChip}</div>` + (isAstroItem(n.item) ? astroHtml(n.item, n.qty) : sourceHtml(n.item.id) + buyHtml(n.item.id, n.qty) + lvlWarn(n.item.id));
+        chips = `<div class="mbd-chips">${haveChip}</div>` + (isAstroItem(n.item) ? astroHtml(n.item, n.qty) : isFarmItem(n.item) ? farmHtml(n.item, n.qty) + buyHtml(n.item.id, n.qty) : sourceHtml(n.item.id) + buyHtml(n.item.id, n.qty) + lvlWarn(n.item.id));
       }
       return `<div class="mbd-step"><div class="mbd-stepno">Step ${i + 1}</div><div class="mbd-title">${title}</div>${chips}</div>`;
     }).join("");
@@ -328,6 +462,11 @@ export function setup(ctx) {
       if (!g && isAstroItem(n.item)) {
         const ch = conChoice(n.item);
         if (ch) return { ...base, kind: "gather", skillId: ASTRO_ID, actionId: ch.c.id, constellation: Astro.pick === "best" ? "best" : ch.c.id, label: `${nm(astroSkill())}: study ${nm(ch.c)} for ${nm(n.item)}` };
+      }
+      if (!g && isFarmItem(n.item)) {
+        const fp = farmPlan(n.item), o = fp.opt;
+        if (o && o.type === "skill") return { ...base, kind: "gather", skillId: o.skill.id, actionId: o.a.id, farm: fp.auto ? "best" : "fixed", label: `${nm(o.skill)}: ${nm(o.a)} for ${nm(n.item)}` };
+        if (o && o.type === "fight" && (o.safety.safe || Farm.risk[n.item.id])) return { ...base, kind: "combat", monsterId: o.m.id, untilItem: n.item.id, targetKills: Math.ceil(n.qty / o.perKill), label: `Fight ${nm(o.m)} for ${nm(n.item)}` };
       }
       if (g) return { ...base, kind: "gather", skillId: g.skill.id, actionId: g.a.id, label: `${nm(g.skill)}: gather ${nm(n.item)}` };
       return { ...base, qty: n.need ?? n.qty, kind: "manual", label: `Get ${nm(n.item)}`, note: plain(sourceText(n.item.id)) };
@@ -478,6 +617,15 @@ export function setup(ctx) {
           if (sel === ".swal2-confirm") el.style.setProperty("min-width", "84px", "important");
         }
         popup?.addEventListener?.("change", (ev) => {
+          const fs = ev.target?.closest?.("[data-mbd-farm]");
+          const fr = ev.target?.closest?.("[data-mbd-risk]");
+          if (fs || fr) {
+            if (fs) Farm.pick[fs.dataset.mbdFarm] = fs.value;
+            if (fr) Farm.risk[fr.dataset.mbdRisk] = fr.checked;
+            const pop2 = popup.querySelector(".mbd-th-pop");
+            if (pop2) pop2.innerHTML = bodyFn();
+            return;
+          }
           const s = ev.target?.closest?.("[data-mbd-astro]");
           if (!s) return;
           Astro.pick = s.value;
@@ -585,7 +733,8 @@ export function setup(ctx) {
   // ---------- starting actions in the game ----------
   // Uses the game's own click handlers, in the same order its buttons use them.
   const startAction = (e) => {
-    const skill = skillById(e.skillId);
+    let skill = skillById(e.skillId);
+    if (e.farm === "best" && e.kind === "gather") { const it = itemById(e.itemId), b = it && bestFarmSkill(it); if (b) { e.skillId = b.skill.id; e.actionId = b.a.id; skill = skillById(e.skillId); } }
     if (skill?.id === ASTRO_ID && e.constellation === "best") { const it = itemById(e.itemId), b = it && bestCon(it); if (b) e.actionId = b.c.id; }
     const a = skill && actionById(skill, e.actionId);
     if (!skill || !a) return { ok: false, reason: "this action wasn't found in your game version" };
@@ -784,6 +933,7 @@ export function setup(ctx) {
     const a = actionById(skill, e.actionId);
     if (!a) return null;
     if (skill.id === ASTRO_ID && e.itemId) { const r = astroPerHour(skill, a, itemById(e.itemId)); return r > 0 ? 3600000 / r : null; }
+    if (e.kind === "gather" && e.itemId && a.product && a.product.id !== e.itemId) { const o = farmSkills(itemById(e.itemId)).find((x) => x.a === a); return o && o.perHr > 0 ? 3600000 / o.perHr : null; }
     const ms = intervalMs(skill, a);
     if (e.kind === "gather") return ms / Math.max(1, a.baseQuantity ?? 1);
     const opt = options(a)[e.altIndex ?? 0];
@@ -962,7 +1112,7 @@ export function setup(ctx) {
           this.activeSkillId = cur.kind === "combat" ? "combat" : cur.skillId ?? null;
           cur.status = "active";
           delete cur.reason;
-          if (cur.kind !== "manual" && cur.kind !== "xp" && cur.kind !== "combat" && cur.startQty === undefined) cur.startQty = have(itemById(cur.itemId)) ?? 0;
+          if (cur.kind !== "manual" && cur.kind !== "xp" && (cur.kind !== "combat" || cur.untilItem) && cur.startQty === undefined) cur.startQty = have(itemById(cur.itemId)) ?? 0;
           Queue.save();
           if (cur.kind !== "manual") {
             const r = startEntry(cur);
@@ -997,7 +1147,7 @@ export function setup(ctx) {
 
         if (cur.kind === "combat") {
           const mon = game.monsters.getObjectByID(cur.monsterId);
-          if (this.gained(cur) >= cur.targetKills) { this.finish(cur); continue; }
+          if (cur.untilItem ? (have(itemById(cur.untilItem)) ?? 0) - (cur.startQty ?? 0) >= cur.qty : this.gained(cur) >= cur.targetKills) { this.finish(cur); continue; }
           if (game.activeAction === game.combat && game.combat.selectedMonster === mon) { Panel.render(); return; }
           if (game.activeAction && game.activeAction !== game.combat) { this.pause("Paused: something else started running."); return; }
           if (cur.started) { this.block(cur, `the fight stopped (you may have died or run out of food). ${this.gained(cur).toLocaleString()} of ${Number(cur.targetKills).toLocaleString()} kills done`); return; }
@@ -1025,6 +1175,14 @@ export function setup(ctx) {
         if (owned - (cur.startQty ?? 0) >= cur.qty) { this.finish(cur); continue; }
 
         const skill = skillById(cur.skillId);
+        if (cur.farm === "best" && skill) {
+          if (cur.lvl === undefined) cur.lvl = skill.level;
+          else if (skill.level > cur.lvl) {
+            cur.lvl = skill.level;
+            const it = itemById(cur.itemId), b = it && bestFarmSkill(it);
+            if (b && (b.a.id !== cur.actionId)) { const rl = startEntry(cur); if (!rl.ok && !rl.transient) { this.block(cur, rl.reason); return; } }
+          }
+        }
         if (cur.constellation === "best" && skill?.id === ASTRO_ID) {
           if (cur.lvl === undefined) cur.lvl = skill.level;
           else if (skill.level > cur.lvl) {
@@ -1586,7 +1744,7 @@ export function setup(ctx) {
       ev.preventDefault();
       ev.stopPropagation();
       try {
-        Astro.pick = "best";
+        Astro.pick = "best"; Farm.pick = {}; Farm.risk = {};
         const onQueue = info.queue && !info.blocked?.() ? (top) => {
           const added = addUnique(info.queue(), top);
           Panel.open();
@@ -1657,7 +1815,7 @@ export function setup(ctx) {
     window.townshipHelper = {
       version: VERSION,
       showItem: (id, qty = 1) => {
-        Astro.pick = "best";
+        Astro.pick = "best"; Farm.pick = {}; Farm.risk = {};
         const it = itemById(id);
         const miss = itemMissing(it, qty);
         fire(`${qty} x ${esc(nm(it))}`, () => (itemMissing(it, qty).length ? missingHtml(itemMissing(it, qty)) : dupHtml(toEntries(buildRows(it, qty))) + itemSection(it, qty)), miss.length || !buildRows(it, qty).length ? null : (top) => {
@@ -1676,7 +1834,7 @@ export function setup(ctx) {
         itemMissing, areaMissing, missingHtml, reqText, buildRows, toEntries, itemSection, sourceHtml, buyHtml, buyFromShop, wikiUrl,
         monsterSection, foodHtml, setsHtml, describeGoal, entryKey, addUnique, dupHtml, tellPlayer, xpCandidates, xpSection, estimateMs,
         startAction, startEntry, killEntry, areaFor, obtainable, fire, openTrain, trainBuild, trainQueue, TS,
-        trainPlan, trainCands, acquireMs, nextBatch, trainEstimate, fmtDur, Astro, astroCons, astroOptions, bestCon, astroHtml, isAstroItem,
+        trainPlan, trainCands, acquireMs, nextBatch, trainEstimate, fmtDur, Astro, Farm, farmSkills, farmFights, farmPlan, fightSafety, monsterMaxHit, dropPerKill, isFarmItem, farmHtml, astroCons, astroOptions, bestCon, astroHtml, isAstroItem,
       },
     };
     LOG("installed", VERSION);
