@@ -647,7 +647,7 @@
   }));
   test(T, "batches use the bank first", () => sandbox(() => {
     const s = skill("Smithing");
-    bankStub((id) => (/Copper_Ore|Tin_Ore|Bronze_Bar/.test(id ?? "") ? 9999 : 0));
+    bankStub((id) => (/_Ore$|_Bar$/.test(id ?? "") ? 9999 : 0)); // every ore and bar, so it works at any Smithing level
     const r = D().nextBatch({ id: "t", skillId: s.id, targetLevel: Math.min(99, s.level + 2) });
     ok(r.ok, r.reason);
     ok(r.entries.every((e) => e.kind !== "gather"), "still gathering ore it already has");
