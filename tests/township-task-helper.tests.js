@@ -1020,6 +1020,7 @@
     const { a } = cookShrimp();
     if (!a) skip("no Shrimp recipe");
     if ((game.bank.getQty(game.items.getObjectByID("melvorD:Raw_Shrimp")) ?? 0) >= 5) skip("the bank holds raw shrimp, so the craft would start");
+    bankStub(() => 0); // nothing cooked yet, nothing raw to cook
     TH().queue.add([shrimpEntry({ id: undefined })]);
     TH().runner.start();
     const items = TH().queue.items;
