@@ -227,6 +227,7 @@ export function setup(ctx) {
       return Math.floor(nmult() * sp.maxHit * (1 + statVal(m, "magicDamageBonus") / 100) * (1 + ((lv.Magic ?? 1) + 1) / 200));
     } catch (e) { return null; }
   };
+  // what you have to survive with: HP, equipped food and the auto eat settings (a queue runs while you're away, so only auto eat counts)
   const playerGuard = () => {
     const pl = game.combat?.player;
     const hs = skillById("melvorD:Hitpoints");
@@ -234,9 +235,16 @@ export function setup(ctx) {
     const slot = pl?.food?.slots?.[pl.food.selectedSlot];
     let heal = 0;
     try { if (slot?.item) heal = pl.getFoodHealing(slot.item); } catch (e) { /* ignore */ }
+    let threshold = 0, eff = 0, swap = false;
+    try { threshold = Number(pl.autoEatThreshold) || 0; eff = threshold > 0 ? Math.max(1, Number(pl.autoEatEfficiency) || 0) : 0; } catch (e) { /* ignore */ }
+    try { swap = pl.modifiers?.autoSwapFoodUnlocked > 0 && !!game.settings?.enableAutoSwapFood; } catch (e) { /* ignore */ }
+    const eat = (s) => Math.floor((pl.getFoodHealing(s.item) * eff) / 100);
     let pool = 0;
-    for (const s of pl?.food?.slots ?? []) { try { if (s.item && s.quantity > 0) pool += s.quantity * pl.getFoodHealing(s.item); } catch (e) { /* ignore */ } }
-    return { hp, heal, food: slot?.item && slot.quantity > 0 ? nm(slot.item) : null, foodQty: slot?.quantity ?? 0, pool };
+    try {
+      const slots = swap ? pl.food.slots : slot ? [slot] : [];
+      for (const s of slots) if (s.item && s.quantity > 0) pool += s.quantity * eat(s);
+    } catch (e) { /* ignore */ }
+    return { hp, heal, food: slot?.item && slot.quantity > 0 ? nm(slot.item) : null, foodQty: slot?.quantity ?? 0, auto: threshold > 0, threshold, eff, effHeal: eff ? Math.floor((heal * eff) / 100) : 0, pool, swap };
   };
   // rough damage you take killing this monster once (it respawns after a few seconds)
   const damagePerKill = (m, avg) => {
@@ -248,19 +256,24 @@ export function setup(ctx) {
       return avg * (killMs / (statVal(m, "attackSpeed") || 3000)) * 0.75;
     } catch (e) { return null; }
   };
-  // safe = two max hits never kill you, your food can out-heal it, and you carry enough food to finish the whole farm
+  // safe = auto eat is on and starts early enough to survive its biggest hit, and your food covers the whole farm
   const fightSafety = (m, kills = 1) => {
     const max = monsterMaxHit(m), g = playerGuard();
     if (max === null) return { safe: false, max, avg: null, g, why: "can't tell how hard it hits" };
     const avg = (1 + max) / 2;
     if (max * 2 >= g.hp) return { safe: false, max, avg, g, why: `can hit for ${num(max)} against your ${num(g.hp)} HP` };
-    if (!g.food || !(g.pool > 0)) return { safe: false, max, avg, g, why: "you have no food equipped" };
-    if (g.heal < avg && max > g.hp * 0.15) return { safe: false, max, avg, g, why: `average hit ${num(Math.round(avg))} but your ${g.food} heals only ${num(Math.round(g.heal))}` };
+    if (!g.food) return { safe: false, max, avg, g, why: "you have no food equipped" };
     const dpk = damagePerKill(m, avg);
-    const need = dpk === null ? null : Math.ceil((dpk * kills) / Math.max(1, g.heal));
-    const have = Math.floor(g.pool / Math.max(1, g.heal));
-    if (dpk !== null && dpk * kills > g.pool) return { safe: false, max, avg, g, need, have, why: `this farm needs about ${num(need)} food and you have ${num(have)} equipped` };
-    return { safe: true, max, avg, g, need, have, why: `hits for ${num(max)} at most against your ${num(g.hp)} HP, and your food lasts` };
+    const total = dpk === null ? null : dpk * kills;
+    if (!g.auto) {
+      if (total !== null && total < g.hp * 0.5) return { safe: true, max, avg, g, why: `it can't do much damage over this farm (about ${num(Math.round(total))} of your ${num(g.hp)} HP)` };
+      return { safe: false, max, avg, g, why: "auto eat is off, so nothing eats your food while the queue runs" };
+    }
+    if (g.threshold < max) return { safe: false, max, avg, g, why: `auto eat starts at ${num(Math.round(g.threshold))} HP but it can hit for ${num(max)}` };
+    const need = total === null ? null : Math.ceil(total / Math.max(1, g.effHeal));
+    const have = Math.floor(g.pool / Math.max(1, g.effHeal));
+    if (total !== null && total > g.pool) return { safe: false, max, avg, g, need, have, why: `this farm needs about ${num(need)} food and auto eat can use ${num(have)}${g.swap ? "" : " from the food slot in use"}` };
+    return { safe: true, max, avg, g, need, have, why: `auto eat starts at ${num(Math.round(g.threshold))} HP, it hits for ${num(max)} at most, and your food lasts` };
   };
   const dropPerKill = (m, item) => {
     let p = 0;

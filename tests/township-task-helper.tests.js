@@ -860,14 +860,18 @@
     const items = await farmAdd(nest(), () => pickFarm(o.id));
     eq(items[0].actionId, o.a.id); eq(items[0].farm, "fixed");
   }));
-  const withFood = (qty, heal) => {
+  // food plus auto eat: auto = { at: HP it starts eating at, eff: % of the healing it gets } or null for auto eat off
+  const withFood = (qty, heal, auto = { at: 1e9, eff: 100 }) => {
     const pl = game.combat.player;
     const food = game.items.allObjects.find((i) => i.healsFor > 0);
     ok(food, "no food item in the game");
     stub(pl.food, "slots", [{ item: food, quantity: qty }]);
     stub(pl.food, "selectedSlot", 0);
     stub(pl, "getFoodHealing", () => heal);
+    stub(pl, "autoEatThreshold", auto ? Math.min(auto.at, pl.stats.maxHitpoints) : 0);
+    stub(pl, "autoEatEfficiency", auto ? auto.eff : 1);
   };
+  const gentle = (fights) => fights.filter((f) => f.safety.max !== null && f.safety.max * 2 < f.safety.g.hp);
   test(F, "no equipped food means no fight is safe", () => sandbox(async () => {
     withFood(0, 100);
     const fights = D().farmFights(bones(), 10);
@@ -875,17 +879,38 @@
     ok(fights.every((f) => !f.safety.safe), "something was safe with no food");
     has(fights[0].safety.why, "no food");
   }));
-  test(F, "plenty of strong food makes a gentle fight safe", () => sandbox(async () => {
+  test(F, "food without auto eat doesn't count, since nothing eats it while the queue runs", () => sandbox(async () => {
+    withFood(100000, 1000, null);
+    const fights = gentle(D().farmFights(bones(), 100000));
+    ok(fights.length > 0, "no gentle monster");
+    ok(fights.every((f) => !f.safety.safe), "a long farm was safe with auto eat off");
+    has(fights[0].safety.why, "auto eat");
+  }));
+  test(F, "auto eat that starts below a monster's biggest hit is not safe", () => sandbox(async () => {
+    withFood(100000, 1000, { at: 1, eff: 100 });
+    const fights = gentle(D().farmFights(bones(), 10)).filter((f) => f.safety.max > 1);
+    ok(fights.length > 0, "no gentle monster");
+    ok(fights.every((f) => !f.safety.safe), "auto eat at 1 HP can't be safe");
+    has(fights[0].safety.why, "auto eat starts");
+  }));
+  test(F, "auto eat plus plenty of food makes a gentle fight safe", () => sandbox(async () => {
     withFood(100000, 1000);
     const fights = D().farmFights(bones(), 10);
-    const gentle = fights.filter((f) => f.safety.max !== null && f.safety.max * 2 < f.safety.g.hp);
-    ok(gentle.length > 0, "no gentle monster");
-    ok(gentle.every((f) => f.safety.safe), "a gentle fight with plenty of food should be safe");
+    ok(gentle(fights).length > 0, "no gentle monster");
+    ok(gentle(fights).every((f) => f.safety.safe), "a gentle fight with auto eat and plenty of food should be safe");
     for (const f of fights) if (f.safety.max !== null && f.safety.max * 2 >= f.safety.g.hp) eq(f.safety.safe, false, nm(f.m));
+  }));
+  test(F, "auto eat efficiency shrinks how far your food goes", () => sandbox(async () => {
+    withFood(40, 100, { at: 1e9, eff: 100 });
+    const full = gentle(D().farmFights(bones(), 300)).find((f) => f.safety.have !== undefined);
+    ok(full, "no gentle monster");
+    withFood(40, 100, { at: 1e9, eff: 25 });
+    const weak = D().farmFights(bones(), 300).find((f) => f.m === full.m);
+    ok(weak.safety.have < full.safety.have, "25% efficiency should cover fewer kills");
   }));
   test(F, "a farm bigger than your food supply is not safe", () => sandbox(async () => {
     withFood(1, 1000);
-    const small = D().farmFights(bones(), 1).find((f) => f.safety.max !== null && f.safety.max * 2 < f.safety.g.hp && f.safety.g.pool > 0);
+    const small = gentle(D().farmFights(bones(), 1)).find((f) => f.safety.g.pool > 0);
     ok(small, "no gentle monster");
     const big = D().farmFights(bones(), 5000000).find((f) => f.m === small.m);
     eq(big.safety.safe, false);
