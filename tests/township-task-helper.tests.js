@@ -747,6 +747,76 @@
     eq(items[0].untilLevel, sk.level + 1, "first step stops at the level");
   }), live);
 
+  const A = "Astrology";
+  const nm = (o) => String(o?.name ?? o?._name ?? o?.id);
+  const stardust = () => game.items.getObjectByID("melvorF:Stardust");
+  const golden = () => game.items.getObjectByID("melvorF:Golden_Stardust");
+  test(A, "Stardust and Golden Stardust are found as Astrology drops", () => sandbox(async () => {
+    for (const it of [stardust(), golden()]) {
+      ok(it, "item missing from the game");
+      ok(D().isAstroItem(it), nm(it) + " has no constellation");
+      ok(D().astroOptions(it).length >= 2, "needs a list of constellations");
+    }
+  }));
+  test(A, "the best pick is the unlocked constellation with the most XP/hour", () => sandbox(async () => {
+    const o = D().astroOptions(stardust()).filter((x) => x.open);
+    ok(o.length > 0, "no unlocked constellation");
+    const best = D().bestCon(stardust());
+    eq(Math.max(...o.map((x) => x.xpHr)), best.xpHr);
+    ok(D().astroOptions(stardust()).filter((x) => !x.open).every((x) => x.level > skill("Astrology").level), "locked ones need a higher level");
+  }));
+  test(A, "the popup offers a constellation picker and keeps the choice", () => sandbox(async () => {
+    TH().showItem("melvorF:Stardust", 5);
+    ok(await popupReady(), "popup never finished opening");
+    const sel = document.querySelector("[data-mbd-astro]");
+    ok(sel, "picker missing");
+    const open = D().astroOptions(stardust()).find((x) => x.open);
+    sel.value = open.c.id;
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+    await sleep(100);
+    eq(document.querySelector("[data-mbd-astro]").value, open.c.id);
+    has(document.querySelector(".mbd-th-pop").textContent, nm(open.c));
+  }));
+  test(A, "picking a constellation queues that one", () => sandbox(async () => {
+    TH().showItem("melvorF:Stardust", 5);
+    ok(await popupReady(), "popup never finished opening");
+    const open = D().astroOptions(stardust()).find((x) => x.open);
+    const sel = document.querySelector("[data-mbd-astro]");
+    sel.value = open.c.id;
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+    await sleep(100);
+    [...document.querySelectorAll(".swal2-actions button")].find((b) => /Add to queue/.test(b.textContent)).click();
+    await sleep(200);
+    const e = TH().queue.items.find((x) => x.skillId === "melvorD:Astrology");
+    ok(e, "no Astrology step queued");
+    eq(e.actionId, open.c.id); eq(e.constellation, open.c.id); eq(e.itemId, "melvorF:Stardust");
+  }));
+  test(A, "leaving it on best queues a step that follows the best constellation", () => sandbox(async () => {
+    TH().showItem("melvorF:Stardust", 5);
+    ok(await popupReady(), "popup never finished opening");
+    [...document.querySelectorAll(".swal2-actions button")].find((b) => /Add to queue/.test(b.textContent)).click();
+    await sleep(200);
+    const e = TH().queue.items.find((x) => x.skillId === "melvorD:Astrology");
+    ok(e, "no Astrology step queued");
+    eq(e.constellation, "best");
+    eq(e.actionId, D().bestCon(stardust()).c.id);
+  }));
+  test(A, "the estimate counts studies per Stardust", () => sandbox(async () => {
+    const c = D().bestCon(stardust());
+    const ms = D().estimateMs({ kind: "gather", skillId: "melvorD:Astrology", actionId: c.c.id, itemId: "melvorF:Stardust", qty: 10, startQty: 0 });
+    ok(ms > 0 && Number.isFinite(ms), "estimate " + ms);
+    const gold = D().estimateMs({ kind: "gather", skillId: "melvorD:Astrology", actionId: c.c.id, itemId: "melvorF:Golden_Stardust", qty: 10, startQty: 0 });
+    ok(gold > ms, "Golden Stardust is rarer, so it should take longer");
+  }));
+  test(A, "starting a step studies the constellation", () => sandbox(async () => {
+    const c = D().bestCon(stardust());
+    const e = { kind: "gather", skillId: "melvorD:Astrology", actionId: c.c.id, constellation: "best", itemId: "melvorF:Stardust", qty: 1, label: "t" };
+    const r = D().startEntry(e);
+    ok(r.ok, "start failed: " + r.reason);
+    eq(game.activeAction?.id, "melvorD:Astrology");
+    game.stopActiveAction();
+  }), { live: true });
+
   // =====================================================================================
   const run = async (opts = {}) => {
     const { live = true, group = null, only = null } = opts;
