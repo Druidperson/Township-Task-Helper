@@ -1,7 +1,8 @@
 # Changelog
 
 ## 0.11.1
-- No change for players. Adds a test suite (see the tests folder) and the hooks it needs.
+- Fixed: pressing Stop while a manual step was waiting for you left it marked as waiting, so the next Start counted it as done. Stop now puts it back to pending.
+- Adds a test suite (see the tests folder) and the hooks it needs.
 
 ## 0.11.0
 - New: train a skill without a Township task. The new button next to the queue button (chart icon) opens a planner for Woodcutting, Mining, Fishing, Cooking, Smithing, Fletching, Runecrafting and the other skills the queue can run.

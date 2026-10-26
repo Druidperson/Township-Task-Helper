@@ -20,7 +20,7 @@
   const fail = (m) => { throw new Error(m); };
   const ok = (c, m = "expected a truthy value") => { if (!c) fail(m); };
   const eq = (a, b, m = "") => { if (a !== b) fail(`${m} expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`.trim()); };
-  const has = (s, sub, m = "") => { if (!String(s).includes(sub)) fail(`${m} expected text to contain ${JSON.stringify(sub)}`.trim()); };
+  const has = (s, sub, m = "") => { if (!String(s).includes(sub)) fail(`${m} expected text to contain ${JSON.stringify(sub)}, got ${JSON.stringify(String(s).replace(/\s+/g, " ").slice(0, 160))}`.trim()); };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const waitFor = async (cond, ms = 15000, step = 200) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await cond()) return true; await sleep(step); } return false; };
   const TH = () => window.townshipHelper;
@@ -36,6 +36,12 @@
   let stubs = [];
   const stub = (obj, key, val) => {
     const d = Object.getOwnPropertyDescriptor(obj, key);
+    if (d && d.configurable === false) { // global function declarations: assign over them
+      const old = obj[key];
+      stubs.push(() => { obj[key] = old; });
+      obj[key] = val;
+      return;
+    }
     stubs.push(() => (d ? Object.defineProperty(obj, key, d) : delete obj[key]));
     Object.defineProperty(obj, key, { value: val, configurable: true, writable: true, enumerable: true });
   };
@@ -66,6 +72,7 @@
       th.panel.close();
     }
   };
+  const popupReady = () => waitFor(() => document.querySelector(".swal2-actions")?.style.display === "flex", 3000, 50);
   const liveOk = () => { if (document.hidden) skip("the game tab is hidden, so the game is paused"); };
 
   // =====================================================================================
@@ -73,7 +80,8 @@
   // =====================================================================================
   const G = "Game contract";
   test(G, "globals the mod needs exist", () => {
-    for (const n of ["game", "SwalLocale", "notifyPlayer", "exp"]) ok(typeof window[n] !== "undefined", `${n} is missing`);
+    const present = { game: typeof game, SwalLocale: typeof SwalLocale, notifyPlayer: typeof notifyPlayer, exp: typeof exp };
+    for (const [n, ty] of Object.entries(present)) ok(ty !== "undefined", `${n} is missing`);
     eq(typeof exp.level_to_xp, "function", "exp.level_to_xp");
     ok(customElements.get("township-task-goal"), "township-task-goal element");
     ok(document.getElementById("skill-footer-minibar"), "skill-footer-minibar");
@@ -248,7 +256,7 @@
     stub(window, "open", (...a) => { args = a; return {}; });
     D().fire("t", () => D().sourceHtml(it.id), null);
     ok(await waitFor(() => document.querySelector(".swal2-popup [data-mbd-wiki]"), 2000, 50), "link not in popup");
-    await sleep(100); // the popup attaches its click handler just after it opens
+    ok(await popupReady(), "popup never finished opening"); // the click handler is attached when it opens
     const link = document.querySelector(".swal2-popup [data-mbd-wiki]");
     // runs after the popup's own handler: if the mod didn't take the click, stop the real navigation and report it
     let intercepted = null;
@@ -261,8 +269,9 @@
     eq(args[1], "_blank");
     has(args[0], "wiki.melvoridle.com");
   }));
-  test(B, "the popup has Add to queue, Add to top and Close in that order", () => sandbox(() => {
+  test(B, "the popup has Add to queue, Add to top and Close in that order", () => sandbox(async () => {
     D().fire("t", () => "x", () => {});
+    ok(await popupReady(), "popup never finished opening");
     const order = ["swal2-deny", "swal2-cancel", "swal2-confirm"].map((c) => Number(document.querySelector("." + c).style.order));
     eq(order.join(), "1,2,3");
   }));
@@ -297,7 +306,8 @@
 
   // =====================================================================================
   const Q = "Queue";
-  const E = (o = {}) => ({ kind: "gather", skillId: "melvorD:Woodcutting", actionId: "melvorD:Normal_Tree", itemId: "melvorD:Normal_Logs", qty: 1, label: "Test step", ...o });
+  const logsAction = () => list(skill("Woodcutting").actions).find((a) => a.product?.id === "melvorD:Normal_Logs");
+  const E = (o = {}) => ({ kind: "gather", skillId: "melvorD:Woodcutting", actionId: logsAction()?.id, itemId: "melvorD:Normal_Logs", qty: 1, label: "Test step", ...o });
   test(Q, "add, remove, move and move to top", () => sandbox(() => {
     const q = TH().queue;
     q.add([E({ label: "A" }), E({ label: "B" }), E({ label: "C" })]);
@@ -476,9 +486,10 @@
     has(TH().queue.items[0].reason, "level");
     ok(!game.activeAction || game.activeAction === null, "something is still running");
   }));
-  test(R, "stop puts the current step back to pending", () => sandbox(() => {
+  test(R, "stop puts the current step back to pending, so Start doesn't skip a manual step", () => sandbox(() => {
     TH().queue.add([{ kind: "manual", itemId: "melvorD:Feathers", qty: 999999999, label: "m", note: "" }]);
     TH().runner.start();
+    eq(TH().queue.items[0].status, "waiting");
     TH().runner.stop();
     eq(TH().runner.state, "idle");
     eq(TH().queue.items[0].status, "pending");

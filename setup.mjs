@@ -823,6 +823,8 @@ export function setup(ctx) {
       this.haltAction();
       const cur = Queue.items.find((e) => e.id === this.activeId);
       if (cur && cur.status !== "done") { cur.status = "pending"; delete cur.startQty; delete cur.reason; delete cur.started; }
+      // a manual step that was waiting for you goes back to pending, so pressing Start later doesn't count it as done
+      for (const e of Queue.items) if (e.status === "waiting") e.status = "pending";
       this.activeId = null;
       this.activeSkillId = null;
       this.focusId = null;
