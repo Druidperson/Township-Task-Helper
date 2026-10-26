@@ -48,10 +48,16 @@
   const bankStub = (fn) => stub(game.bank, "getQty", (it) => fn(it?.id));
   const notes = [];
   const captureNotices = () => stub(window, "notifyPlayer", (_, msg) => { notes.push(String(msg)); });
-  const closePopups = () => { try { Swal.close(); } catch (e) { /* none open */ } try { SwalLocale.close(); } catch (e) { /* none open */ } };
+  // closing animates, and a half-closed popup would answer the next test's lookups
+  const closePopups = async () => {
+    try { Swal.close(); } catch (e) { /* none open */ }
+    await waitFor(() => !document.querySelector(".swal2-container"), 3000, 50);
+    document.querySelectorAll(".swal2-container").forEach((x) => x.remove());
+  };
   const sandbox = async (fn) => {
     const th = TH();
     th.runner.stop();
+    await closePopups();
     const saved = JSON.stringify(th.queue.items);
     const sAuto = th.settings.autoStart(), sSell = th.settings.autoSell();
     th.settings.setAutoStart(false);
@@ -63,7 +69,7 @@
     finally {
       th.runner.stop();
       try { if (game.activeAction) game.stopActiveAction(); } catch (e) { /* ignore */ }
-      closePopups();
+      await closePopups();
       while (stubs.length) stubs.pop()();
       th.queue.items = JSON.parse(saved);
       th.queue.save();
@@ -258,13 +264,12 @@
     ok(await waitFor(() => document.querySelector(".swal2-popup [data-mbd-wiki]"), 2000, 50), "link not in popup");
     ok(await popupReady(), "popup never finished opening"); // the click handler is attached when it opens
     const link = document.querySelector(".swal2-popup [data-mbd-wiki]");
-    // runs after the popup's own handler: if the mod didn't take the click, stop the real navigation and report it
-    let intercepted = null;
-    const guard = (ev) => { intercepted = ev.defaultPrevented; if (!ev.defaultPrevented) ev.preventDefault(); };
-    window.addEventListener("click", guard, { once: true });
-    link.click();
-    window.removeEventListener("click", guard);
-    ok(intercepted === true, "the click wasn't intercepted, so the link would have changed the game's own tab");
+    // the mod stops the click from bubbling, so watch preventDefault itself
+    let intercepted = false;
+    const realPrevent = Event.prototype.preventDefault;
+    Event.prototype.preventDefault = function () { if (this.type === "click" && this.target === link) intercepted = true; return realPrevent.call(this); };
+    try { link.click(); } finally { Event.prototype.preventDefault = realPrevent; }
+    ok(intercepted, "the click wasn't intercepted, so the link would have changed the game's own tab");
     ok(args, "window.open wasn't called");
     eq(args[1], "_blank");
     has(args[0], "wiki.melvoridle.com");
