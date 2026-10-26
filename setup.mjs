@@ -3,10 +3,15 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.13.3";
+  const VERSION = "0.13.4";
   const LOG = (...a) => console.log("[Township Task Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
-  const nm = (o) => String(o?.name ?? o?._name ?? o?._localID ?? o?.id ?? "?");
+  const nm = (o) => {
+    const n = String(o?.name ?? o?._name ?? o?._localID ?? o?.id ?? "?");
+    // some areas (Into the Mist, Lair of the Spider Queen) have a placeholder "random" monster with no name in the game files
+    if (/^UNDEFINED TRANSLATION/i.test(n)) { try { const a = ["combatAreas", "slayerAreas", "dungeons", "strongholds", "abyssDepths"].flatMap((k) => list(game[k])).find((x) => (x.monsters ?? []).includes(o)); return a ? `Random monster in ${String(a.name)}` : "Random monster"; } catch (e) { return "Random monster"; } }
+    return n;
+  };
   const esc = (s) =>
     String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const plain = (html) => { const d = document.createElement("div"); d.innerHTML = html; return d.textContent; };

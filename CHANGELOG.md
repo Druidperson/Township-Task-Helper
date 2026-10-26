@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.13.4
+- Fixed: the fight list showed "UNDEFINED TRANSLATION" for the random monsters in Into the Mist and the Lair of the Spider Queen. The game gives them no name, so they now read "Random monster in <area>".
+
 ## 0.13.3
 - The fight picker for dropped items now shows each monster's combat level and lists them lowest level first, so it's easier to pick one that suits you. The chosen fight shows its combat level too.
 

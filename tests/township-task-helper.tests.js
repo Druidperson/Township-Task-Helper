@@ -1039,6 +1039,18 @@
     for (let i = 1; i < lv.length; i++) ok(lv[i] >= lv[i - 1], "not sorted by combat level");
   }));
 
+  test(F, "monsters with no name in the game files get a readable name", () => sandbox(async () => {
+    const odd = list(game.monsters).filter((m) => /undefined translation/i.test(String(m.name)));
+    if (!odd.length) skip("every monster has a name");
+    for (const m of odd) {
+      const it = list(m.lootTable?.drops ?? []).map((d) => d.item).find(Boolean);
+      if (!it) continue;
+      const html = D().farmHtml(it, 1);
+      ok(!/undefined translation/i.test(html), "the picker still shows the placeholder name for " + m.id);
+      has(html, "Random monster");
+    }
+  }));
+
   // =====================================================================================
   const run = async (opts = {}) => {
     const { live = true, group = null, only = null } = opts;
