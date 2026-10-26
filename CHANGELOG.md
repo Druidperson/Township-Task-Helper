@@ -4,6 +4,7 @@
 - New: items that only drop, like Bird Nest or Bones, now get a real plan instead of a "go get it yourself" step.
 - If a skill drops the item while you train it (Bird Nest from Woodcutting), the queue does that skill with the best XP per hour you can use, and moves up as you level.
 - If only monsters drop it, the queue fights the one with the best drop rate that is safe for you. Safe means two of its biggest hits can't kill you, and either it barely scratches you or your equipped food heals more than its average hit.
+- A fight is only safe if you have food equipped and enough of it to finish the whole farm. No food, or too little for the number of kills, counts as risky.
 - If every fight looks risky, the popup says why and asks you to tick a box before it queues the fight.
 - The popup has a picker, so you can choose a specific tree, or a specific monster, instead of the automatic pick.
 - If your active Slayer task is a monster that drops the item, it shows up in the list marked as your task, so the kills count twice.
