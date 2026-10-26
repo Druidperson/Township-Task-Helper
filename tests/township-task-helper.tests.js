@@ -961,6 +961,46 @@
     r.stop();
   }));
 
+  const XG = "XP goals";
+  const xpE = (name, extra) => { const sk = skill(name); return { id: "t", kind: "xp", skillId: sk.id, targetXp: Math.floor(sk.xp ?? 0) + 3000, ...extra }; };
+  test(XG, "an XP goal with no materials plans the gathering for a skill that needs logs", () => sandbox(async () => {
+    const sk = skill("Firemaking");
+    bankStub(() => 0);
+    eq(D().xpCandidates(sk).length, 0, "bank is empty, nothing should be ready");
+    const r = D().xpMaterialBatch(xpE("Firemaking"));
+    ok(r.ok, r.reason);
+    ok(r.entries.length > 0 && r.entries.every((x) => x.kind !== "manual"), "steps should be things the queue can do");
+    ok(r.entries.some((x) => x.skillId === "melvorD:Woodcutting"), "should chop logs");
+  }));
+  test(XG, "a crafting skill plans the whole chain and stops at the exact XP", () => sandbox(async () => {
+    const sk = skill("Smithing");
+    bankStub(() => 0);
+    const target = Math.floor(sk.xp ?? 0) + 5;
+    const r = D().xpMaterialBatch(xpE("Smithing", { targetXp: target }));
+    ok(r.ok, r.reason);
+    const last = r.entries[r.entries.length - 1];
+    eq(last.untilXp, target);
+    ok(r.entries.some((x) => x.kind === "gather"), "should gather ore first");
+  }));
+  test(XG, "the popup says what it will gather first", () => sandbox(async () => {
+    bankStub(() => 0);
+    const sk = skill("Firemaking");
+    has(D().xpSection(sk, Math.floor(sk.xp ?? 0) + 3000).replace(/<[^>]+>/g, " "), "get the materials");
+  }));
+  test(XG, "the runner adds the gathering above the XP step instead of stopping", () => sandbox(async () => {
+    liveOk();
+    const sk = skill("Firemaking");
+    bankStub(() => 0);
+    TH().queue.add([xpE("Firemaking", { qty: 1, label: "Firemaking XP" })]);
+    TH().runner.start();
+    const items = TH().queue.items;
+    ok(items.length > 1, "no steps were added");
+    eq(items[items.length - 1].kind, "xp");
+    ok(items[0].parent, "added steps should point at the XP step");
+    ok(items.every((x) => x.status !== "blocked"), "nothing should be blocked");
+    TH().runner.stop();
+  }), { live: true });
+
   // =====================================================================================
   const run = async (opts = {}) => {
     const { live = true, group = null, only = null } = opts;
