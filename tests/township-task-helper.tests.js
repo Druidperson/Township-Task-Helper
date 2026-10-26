@@ -818,6 +818,98 @@
     game.stopActiveAction();
   }), { live: true });
 
+  const F = "Random drops";
+  const nest = () => game.items.getObjectByID("melvorD:Bird_Nest");
+  const bones = () => game.items.getObjectByID("melvorD:Bones");
+  const farmAdd = async (item, setup) => {
+    TH().showItem(item.id, (game.bank.getQty(item) ?? 0) + 5);
+    ok(await popupReady(), "popup never finished opening");
+    if (setup) await setup();
+    [...document.querySelectorAll(".swal2-actions button")].find((b) => /Add to queue/.test(b.textContent)).click();
+    await sleep(250);
+    return TH().queue.items;
+  };
+  const pickFarm = async (value) => {
+    const s = document.querySelector("[data-mbd-farm]");
+    ok(s, "farm picker missing");
+    s.value = value;
+    s.dispatchEvent(new Event("change", { bubbles: true }));
+    await sleep(150);
+  };
+  test(F, "Bird Nest is farmed by skilling and picks the best open XP/hour", () => sandbox(async () => {
+    ok(D().isFarmItem(nest()), "Bird Nest should be a farm item");
+    const opts = D().farmSkills(nest());
+    ok(opts.length > 3, "should list the trees");
+    const open = opts.filter((o) => o.open);
+    ok(open.length > 0, "no open tree");
+    const plan = D().farmPlan(nest());
+    eq(plan.opt.type, "skill");
+    eq(plan.opt.xpHr, Math.max(...open.map((o) => o.xpHr)));
+  }));
+  test(F, "Bird Nest queues a Woodcutting step that follows the best tree", () => sandbox(async () => {
+    const items = await farmAdd(nest());
+    const e = items[0];
+    ok(e, "nothing queued");
+    eq(e.kind, "gather"); eq(e.skillId, "melvorD:Woodcutting"); eq(e.farm, "best"); eq(e.itemId, "melvorD:Bird_Nest");
+    ok(D().estimateMs(e) > 0, "needs an estimate");
+  }));
+  test(F, "a chosen tree is queued as picked", () => sandbox(async () => {
+    const o = D().farmSkills(nest()).find((x) => x.open && x.id !== D().farmPlan(nest()).opt.id);
+    if (!o) throw new Skip("only one tree is open");
+    const items = await farmAdd(nest(), () => pickFarm(o.id));
+    eq(items[0].actionId, o.a.id); eq(items[0].farm, "fixed");
+  }));
+  test(F, "safety follows the hit size, your HP and your food", () => sandbox(async () => {
+    const fights = D().farmFights(bones());
+    ok(fights.length > 3, "bones should drop from many monsters");
+    for (const f of fights) {
+      const s = f.safety, hp = s.g.hp;
+      if (s.max === null) { eq(s.safe, false); continue; }
+      const expect = s.max * 2 < hp && (s.max <= hp * 0.15 || (!!s.g.food && s.g.heal >= (1 + s.max) / 2));
+      eq(s.safe, expect, nm(f.m));
+    }
+  }));
+  test(F, "a fight that is not safe is not queued unless you tick the box", () => sandbox(async () => {
+    const risky = D().farmFights(bones()).find((f) => f.open && !f.safety.safe);
+    if (!risky) throw new Skip("every fight is safe for this character");
+    let items = await farmAdd(bones(), () => pickFarm(risky.id));
+    eq(items[0].kind, "manual");
+    TH().queue.clear();
+    await closePopups();
+    items = await farmAdd(bones(), async () => {
+      await pickFarm(risky.id);
+      const cb = document.querySelector("[data-mbd-risk]");
+      ok(cb, "risk box missing");
+      cb.checked = true;
+      cb.dispatchEvent(new Event("change", { bubbles: true }));
+      await sleep(150);
+    });
+    eq(items[0].kind, "combat"); eq(items[0].untilItem, "melvorD:Bones"); eq(items[0].monsterId, risky.m.id);
+  }));
+  test(F, "a safe fight queues without asking", () => sandbox(async () => {
+    const safe = D().farmFights(bones()).find((f) => f.open && f.safety.safe);
+    if (!safe) throw new Skip("no safe fight for this character");
+    const items = await farmAdd(bones(), () => pickFarm(safe.id));
+    eq(items[0].kind, "combat"); eq(items[0].monsterId, safe.m.id);
+  }));
+  test(F, "your Slayer task is flagged when its monster drops the item", () => sandbox(async () => {
+    const m = D().farmFights(bones()).find((f) => f.open)?.m;
+    ok(m, "no monster");
+    const t = game.combat.slayerTask;
+    stub(t, "active", true); stub(t, "monster", m); stub(t, "killsLeft", 25);
+    const f = D().farmFights(bones()).find((x) => x.m === m);
+    eq(f.onTask, true); eq(f.taskLeft, 25);
+  }));
+  test(F, "the fight step finishes when the item is in the bank", () => sandbox(async () => {
+    const m = D().farmFights(bones()).find((f) => f.open)?.m;
+    TH().queue.add([{ kind: "combat", monsterId: m.id, untilItem: "melvorD:Bones", targetKills: 99, qty: 3, startQty: 0, label: "t" }]);
+    bankStub((id) => (id === "melvorD:Bones" ? 3 : 0));
+    const r = TH().runner;
+    r.start();
+    eq(TH().queue.items[0].status, "done");
+    r.stop();
+  }));
+
   // =====================================================================================
   const run = async (opts = {}) => {
     const { live = true, group = null, only = null } = opts;

@@ -272,8 +272,8 @@ export function setup(ctx) {
     return out.sort((a, b) => b.open - a.open || b.safety.safe - a.safety.safe || b.onTask - a.onTask || b.perKill - a.perKill);
   };
   // what "best" means for this item right now
-  const farmPlan = (item) => {
-    const pick = farmPick(item);
+  const farmPlan = (item, ignorePick = false) => {
+    const pick = ignorePick ? "best" : farmPick(item);
     const skills = farmSkills(item), fights = farmFights(item);
     if (pick.startsWith("s:")) { const o = skills.find((x) => x.id === pick && x.open); if (o) return { opt: o, auto: false }; }
     if (pick.startsWith("m:")) { const o = fights.find((x) => x.id === pick && x.open); if (o) return { opt: o, auto: false }; }
@@ -287,13 +287,13 @@ export function setup(ctx) {
   };
   const farmHtml = (item, qty) => {
     const skills = farmSkills(item), fights = farmFights(item);
-    const plan = farmPlan(item), o = plan.opt;
+    const plan = farmPlan(item), o = plan.opt, auto = farmPlan(item, true).opt;
     if (!skills.length && !fights.length) return sourceHtml(item.id);
     const label = (x) => x.type === "skill"
       ? `${nm(x.skill)}: ${nm(x.a)} · ${num(Math.round(x.xpHr))} XP/h · about ${(x.perHr).toFixed(x.perHr < 10 ? 1 : 0)}/h${x.open ? "" : ` (needs level ${x.level})`}`
-      : `Fight ${nm(x.m)} · about ${num(Math.ceil(1 / x.perKill))} kills each · ${x.safety.safe ? "safe" : "risky"}${x.onTask ? " · your Slayer task" : ""}${x.open ? "" : " (area locked)"}`;
+      : `Fight ${nm(x.m)} · ${x.perKill >= 1 ? "drops every kill" : `about 1 in ${num(Math.round(1 / x.perKill))} kills`} · ${x.safety.safe ? "safe" : "risky"}${x.onTask ? " · your Slayer task" : ""}${x.open ? "" : " (area locked)"}`;
     const cur = farmPick(item);
-    const autoTxt = !o ? "nothing you can do yet" : o.type === "skill" ? `${nm(o.skill)}, ${nm(o.a)} (best XP/hour)` : `fight ${nm(o.m)}${o.safety.safe ? " (safe for you)" : " (risky)"}`;
+    const autoTxt = !auto ? "nothing you can do yet" : auto.type === "skill" ? `${nm(auto.skill)}, ${nm(auto.a)} (best XP/hour)` : `fight ${nm(auto.m)}${auto.safety.safe ? " (safe for you)" : " (risky)"}`;
     const sel = `<select data-mbd-farm="${esc(item.id)}" class="custom-select custom-select-sm" style="max-width:100%;width:auto">` +
       `<option value="best"${cur === "best" ? " selected" : ""}>Automatic: ${esc(autoTxt)}</option>` +
       (skills.length ? `<optgroup label="Skilling">${skills.map((x) => `<option value="${esc(x.id)}"${cur === x.id ? " selected" : ""}${x.open ? "" : " disabled"}>${esc(label(x))}</option>`).join("")}</optgroup>` : "") +
