@@ -1030,6 +1030,15 @@
     TH().runner.stop();
   }));
 
+  test(F, "every fight in the picker shows its combat level, lowest first", () => sandbox(async () => {
+    TH().showItem("melvorD:Bones", (game.bank.getQty(bones()) ?? 0) + 5);
+    ok(await popupReady(), "popup never finished opening");
+    const opts = [...document.querySelectorAll("[data-mbd-farm] optgroup[label^='Combat'] option")];
+    ok(opts.length > 3, "fights should be listed");
+    const lv = opts.map((o) => { const m = /Combat Lv ([\d,]+)/.exec(o.textContent); ok(m, "no combat level in: " + o.textContent); return Number(m[1].replace(/,/g, "")); });
+    for (let i = 1; i < lv.length; i++) ok(lv[i] >= lv[i - 1], "not sorted by combat level");
+  }));
+
   // =====================================================================================
   const run = async (opts = {}) => {
     const { live = true, group = null, only = null } = opts;

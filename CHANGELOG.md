@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.13.3
+- The fight picker for dropped items now shows each monster's combat level and lists them lowest level first, so it's easier to pick one that suits you. The chosen fight shows its combat level too.
+
 ## 0.13.2
 - Fixed: a craft step that runs out of ingredients no longer stops the whole queue. Cooking burns some food, so 63 raw shrimp can give fewer than 63 cooked. The queue now works out how many are still missing, gathers or makes just that many ingredients again, and carries on. If it keeps running short without making any more, it stops with a note.
 
