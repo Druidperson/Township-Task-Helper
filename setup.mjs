@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.11.1";
+  const VERSION = "0.12.0";
   const LOG = (...a) => console.log("[Township Task Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => String(o?.name ?? o?._name ?? o?._localID ?? o?.id ?? "?");
@@ -69,6 +69,7 @@ export function setup(ctx) {
         const isCraft = Array.isArray(a.itemCosts) && (a.itemCosts.length > 0 || (a.alternativeCosts?.length ?? 0) > 0);
         if (a.product) push(isCraft ? idx.crafters : idx.gatherers, a.product.id, { skill, a });
         for (const rp of a.randomProducts ?? []) if (rp?.id) push(idx.randoms, rp.id, { skill, a });
+        if (skill.id === ASTRO_ID && (!a.realm || a.realm.id === MELVOR_REALM)) for (const ri of a.randomItems ?? []) if (ri?.id) push(idx.randoms, ri.id, { skill, a });
       }
     }
     for (const m of list(game.monsters)) {
@@ -140,6 +141,48 @@ export function setup(ctx) {
     const parts = sourceParts(id);
     if (!parts.length) return `<div class="mbd-chips">${chip("No source found in the game data (chest, event or other)", "warn")}</div><div class="mbd-chips">${wikiChip(id)}</div>`;
     return parts.map((p) => `<div class="mbd-chips">${chip(`<i class="fa ${p.fa}"></i> <b>${p.label}</b>`, "lbl")}${p.items.map((i) => chip(i)).join("")}</div>`).join("");
+  };
+
+  // ---------- Astrology: Stardust and Golden Stardust are random drops from studying a constellation ----------
+  // Each constellation also boosts other skills, so the player picks one on purpose or lets the mod take the best XP per hour.
+  const ASTRO_ID = "melvorD:Astrology";
+  const Astro = { pick: "best" }; // "best" or a constellation id; reset whenever a popup opens
+  const astroSkill = () => skillById(ASTRO_ID);
+  const astroCons = (item) => {
+    const sk = astroSkill();
+    return sk && item ? list(sk.actions).filter((c) => (!c.realm || c.realm.id === MELVOR_REALM) && (c.randomItems ?? []).some((i) => i.id === item.id)) : [];
+  };
+  const isAstroItem = (item) => astroCons(item).length > 0;
+  const astroInterval = (sk, c) => sk.getConstellationInterval?.(c) ?? intervalMs(sk, c);
+  const astroXpHr = (sk, c) => ((c.baseExperience ?? 0) / astroInterval(sk, c)) * 3600000;
+  // how many of the item one hour of studying finds, on average
+  const astroPerHour = (sk, c, item) => {
+    const p = Number(sk.getRandomItemChance?.(item) ?? 0) / 100;
+    const d = Number(sk.getDoublingChance?.(c) ?? 0) / 100;
+    return (3600000 / astroInterval(sk, c)) * p * (1 + (d > 0 && d < 1 ? d : 0));
+  };
+  const astroOptions = (item) => {
+    const sk = astroSkill();
+    return astroCons(item).map((c) => ({ c, level: c.level ?? 1, open: (c.level ?? 1) <= sk.level, xpHr: astroXpHr(sk, c), perHr: astroPerHour(sk, c, item) })).sort((a, b) => a.level - b.level);
+  };
+  const bestCon = (item) => astroOptions(item).filter((o) => o.open).sort((a, b) => b.xpHr - a.xpHr || b.level - a.level)[0] ?? null;
+  const conChoice = (item) => (Astro.pick === "best" ? bestCon(item) : astroOptions(item).find((o) => o.c.id === Astro.pick && o.open) ?? bestCon(item));
+  const astroBoosts = (c) => (c.skills ?? []).map((s) => nm(s));
+  const astroHtml = (item, qty) => {
+    const sk = astroSkill(), opts = astroOptions(item), best = bestCon(item), cur = conChoice(item);
+    if (!opts.length || !best || !cur) return sourceHtml(item.id);
+    const label = (o) => `${nm(o.c)} · ${astroBoosts(o.c).slice(0, 3).join(", ")}${astroBoosts(o.c).length > 3 ? "..." : ""} · ${num(Math.round(o.xpHr))} XP/h`;
+    const sel = `<select data-mbd-astro class="custom-select custom-select-sm" style="max-width:100%;width:auto">` +
+      `<option value="best"${Astro.pick === "best" ? " selected" : ""}>Best XP/hour: ${esc(nm(best.c))} (${num(Math.round(best.xpHr))} XP/h)</option>` +
+      opts.map((o) => `<option value="${esc(o.c.id)}"${Astro.pick === o.c.id ? " selected" : ""}${o.open ? "" : " disabled"}>${esc(label(o))}${o.open ? "" : ` (needs level ${o.level})`}</option>`).join("") + `</select>`;
+    const hrs = qty / Math.max(1e-9, cur.perHr);
+    const mastery = (() => { try { return sk.getMasteryLevel(cur.c); } catch (e) { return null; } })();
+    return `<div class="mbd-chips">${chip(`<i class="fa fa-star"></i> <b>Astrology</b>`, "lbl")}${chip("Random drop while studying a constellation")}</div>` +
+      `<div class="mbd-row"><div class="mbd-rowlbl">Which constellation?</div><div class="mbd-chips">${sel}</div></div>` +
+      `<div class="mbd-chips">${chip(`${esc(nm(cur.c))}`)}${chip(`${num(Math.round(cur.xpHr))} XP/hour`)}${mastery !== null ? chip(`Mastery ${mastery}`) : ""}` +
+      `${chip(`About ${fmtDur(hrs * 3600000)}`, "ok", "Average, at base speed")}</div>` +
+      `<div class="mbd-chips">${chip(`Boosts ${esc(astroBoosts(cur.c).join(", "))}`)}</div>` +
+      `<div class="mbd-note">Studying also levels the constellation's mastery. Pick one to train it on purpose, or take the best XP/hour and the queue switches to a better one when you level up.</div>`;
   };
 
   // ---------- breakdown rows -> popup html / queue entries ----------
@@ -266,7 +309,7 @@ export function setup(ctx) {
           (lvlChip(c.skill, c.a) ? `<div class="mbd-chips">${lvlChip(c.skill, c.a)}</div>` : "");
       } else {
         title = `${icon(n.item)}<b>${esc(nm(n.item))}</b> &times;${num(n.qty)}`;
-        chips = `<div class="mbd-chips">${haveChip}</div>` + sourceHtml(n.item.id) + buyHtml(n.item.id, n.qty) + lvlWarn(n.item.id);
+        chips = `<div class="mbd-chips">${haveChip}</div>` + (isAstroItem(n.item) ? astroHtml(n.item, n.qty) : sourceHtml(n.item.id) + buyHtml(n.item.id, n.qty) + lvlWarn(n.item.id));
       }
       return `<div class="mbd-step"><div class="mbd-stepno">Step ${i + 1}</div><div class="mbd-title">${title}</div>${chips}</div>`;
     }).join("");
@@ -282,6 +325,10 @@ export function setup(ctx) {
         return { ...base, kind: "craft", skillId: c.skill.id, actionId: c.a.id, altIndex: 0, label: `${nm(c.skill)}: make ${nm(n.item)}` };
       }
       const g = idx.gatherers.get(n.item.id)?.[0];
+      if (!g && isAstroItem(n.item)) {
+        const ch = conChoice(n.item);
+        if (ch) return { ...base, kind: "gather", skillId: ASTRO_ID, actionId: ch.c.id, constellation: Astro.pick === "best" ? "best" : ch.c.id, label: `${nm(astroSkill())}: study ${nm(ch.c)} for ${nm(n.item)}` };
+      }
       if (g) return { ...base, kind: "gather", skillId: g.skill.id, actionId: g.a.id, label: `${nm(g.skill)}: gather ${nm(n.item)}` };
       return { ...base, qty: n.need ?? n.qty, kind: "manual", label: `Get ${nm(n.item)}`, note: plain(sourceText(n.item.id)) };
     });
@@ -430,6 +477,13 @@ export function setup(ctx) {
           for (const [k, v] of Object.entries(sz)) el.style.setProperty(k, v, "important");
           if (sel === ".swal2-confirm") el.style.setProperty("min-width", "84px", "important");
         }
+        popup?.addEventListener?.("change", (ev) => {
+          const s = ev.target?.closest?.("[data-mbd-astro]");
+          if (!s) return;
+          Astro.pick = s.value;
+          const pop = popup.querySelector(".mbd-th-pop");
+          if (pop) pop.innerHTML = bodyFn();
+        });
         popup?.addEventListener?.("click", (ev) => {
           const wk = ev.target.closest?.("[data-mbd-wiki]");
           if (wk) {
@@ -532,6 +586,7 @@ export function setup(ctx) {
   // Uses the game's own click handlers, in the same order its buttons use them.
   const startAction = (e) => {
     const skill = skillById(e.skillId);
+    if (skill?.id === ASTRO_ID && e.constellation === "best") { const it = itemById(e.itemId), b = it && bestCon(it); if (b) e.actionId = b.c.id; }
     const a = skill && actionById(skill, e.actionId);
     if (!skill || !a) return { ok: false, reason: "this action wasn't found in your game version" };
     if (a.level > skill.level) return { ok: false, reason: `needs ${nm(skill)} level ${a.level}` };
@@ -560,6 +615,9 @@ export function setup(ctx) {
           if (have(a.log) !== null && have(a.log) < 1) return { ok: false, reason: `no ${nm(a.log)} in the bank` };
           skill.selectLog(a);
           skill.burnLog();
+          break;
+        case "melvorD:Astrology":
+          skill.studyConstellationOnClick(a);
           break;
         case "melvorD:Cooking":
           skill.onRecipeSelectionClick(a);
@@ -725,6 +783,7 @@ export function setup(ctx) {
     if (e.kind === "xp") { const best = xpCandidates(skill, true)[0]; return best && best.rate > 0 ? 3600000 / best.rate : null; }
     const a = actionById(skill, e.actionId);
     if (!a) return null;
+    if (skill.id === ASTRO_ID && e.itemId) { const r = astroPerHour(skill, a, itemById(e.itemId)); return r > 0 ? 3600000 / r : null; }
     const ms = intervalMs(skill, a);
     if (e.kind === "gather") return ms / Math.max(1, a.baseQuantity ?? 1);
     const opt = options(a)[e.altIndex ?? 0];
@@ -850,7 +909,7 @@ export function setup(ctx) {
       try {
         if ((!Settings.autoSell() && !entry.sellAll) || (entry.kind !== "craft" && entry.kind !== "gather") || entry.startQty === undefined) return;
         const item = itemById(entry.itemId);
-        if (!item || !(item.sellsFor?.quantity > 0)) return;
+        if (!item || !(item.sellsFor?.quantity > 0) || isAstroItem(item)) return;
         const bi = game.bank.items.get(item);
         if (!bi || bi.locked) return;
         const extra = Math.min(bi.quantity, bi.quantity - entry.startQty - (entry.sellAll ? 0 : entry.qty));
@@ -966,6 +1025,14 @@ export function setup(ctx) {
         if (owned - (cur.startQty ?? 0) >= cur.qty) { this.finish(cur); continue; }
 
         const skill = skillById(cur.skillId);
+        if (cur.constellation === "best" && skill?.id === ASTRO_ID) {
+          if (cur.lvl === undefined) cur.lvl = skill.level;
+          else if (skill.level > cur.lvl) {
+            cur.lvl = skill.level;
+            const it = itemById(cur.itemId), b = it && bestCon(it);
+            if (b && b.c.id !== cur.actionId) { const rl = startEntry(cur); if (!rl.ok && !rl.transient) { this.block(cur, rl.reason); return; } }
+          }
+        }
         if (skill && skill.isActive && game.activeAction === skill) { Panel.render(); return; }
         if (game.activeAction && game.activeAction !== skill) { this.pause("Paused: something else started running."); return; }
 
@@ -1519,6 +1586,7 @@ export function setup(ctx) {
       ev.preventDefault();
       ev.stopPropagation();
       try {
+        Astro.pick = "best";
         const onQueue = info.queue && !info.blocked?.() ? (top) => {
           const added = addUnique(info.queue(), top);
           Panel.open();
@@ -1589,6 +1657,7 @@ export function setup(ctx) {
     window.townshipHelper = {
       version: VERSION,
       showItem: (id, qty = 1) => {
+        Astro.pick = "best";
         const it = itemById(id);
         const miss = itemMissing(it, qty);
         fire(`${qty} x ${esc(nm(it))}`, () => (itemMissing(it, qty).length ? missingHtml(itemMissing(it, qty)) : dupHtml(toEntries(buildRows(it, qty))) + itemSection(it, qty)), miss.length || !buildRows(it, qty).length ? null : (top) => {
@@ -1607,7 +1676,7 @@ export function setup(ctx) {
         itemMissing, areaMissing, missingHtml, reqText, buildRows, toEntries, itemSection, sourceHtml, buyHtml, buyFromShop, wikiUrl,
         monsterSection, foodHtml, setsHtml, describeGoal, entryKey, addUnique, dupHtml, tellPlayer, xpCandidates, xpSection, estimateMs,
         startAction, startEntry, killEntry, areaFor, obtainable, fire, openTrain, trainBuild, trainQueue, TS,
-        trainPlan, trainCands, acquireMs, nextBatch, trainEstimate, fmtDur,
+        trainPlan, trainCands, acquireMs, nextBatch, trainEstimate, fmtDur, Astro, astroCons, astroOptions, bestCon, astroHtml, isAstroItem,
       },
     };
     LOG("installed", VERSION);
