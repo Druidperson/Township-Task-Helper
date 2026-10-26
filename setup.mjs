@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.14.0";
+  const VERSION = "0.14.1";
   const LOG = (...a) => console.log("[Township Task Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => {
@@ -72,6 +72,39 @@ export function setup(ctx) {
   const skillById = (id) => list(game.skills).find((s) => s.id === id);
   const actionById = (skill, id) => list(skill?.actions).find((a) => a.id === id);
 
+  // drops that live in a skill's own mechanics instead of a random product list:
+  // gems while mining, general rare items while thieving, special finds while fishing.
+  // each one gives a function that returns the chance (in %) per action.
+  const specialDrops = (skill, a) => {
+    const out = [];
+    try {
+      if (a.realm && a.realm.id !== MELVOR_REALM) return out;
+      const mods = () => game.modifiers ?? {};
+      if (skill.id === "melvorD:Mining" && a.giveGems && game.randomGemTable?.drops) {
+        const tw = game.randomGemTable.totalWeight || game.randomGemTable.drops.reduce((t, d) => t + d.weight, 0);
+        for (const d of game.randomGemTable.drops) if (d?.item) out.push({ id: d.item.id, pct: () => (1 + Number(mods().miningGemChance ?? 0)) * (1 + Number(mods().offItemChance ?? 0) / 100) * (d.weight / tw) });
+      } else if (skill.id === "melvorD:Thieving") {
+        for (const r of list(skill.generalRareItems)) {
+          if (!r?.item || (r.npcs && !(r.npcs.has ? r.npcs.has(a) : false))) continue;
+          try { if (skill.isCorrectRealmForGeneralRareDrop && !skill.isCorrectRealmForGeneralRareDrop(r, a.realm)) continue; } catch (e) { /* ignore */ }
+          out.push({ id: r.item.id, pct: () => { let ok = 1; try { const v = Number(skill.getNPCSuccessRate?.(a)); if (v > 0) ok = v > 1 ? v / 100 : v; } catch (e) { /* ignore */ } return Number(r.chance) * ok; } });
+        }
+      } else if (skill.id === "melvorD:Fishing" && a.area && skill.specialItemTables?.get) {
+        const tbl = skill.specialItemTables.get(a.realm ?? game.realms?.getObjectByID?.(MELVOR_REALM)) ?? skill.specialItemTables.get(game.realms?.getObjectByID?.(MELVOR_REALM));
+        if (tbl?.drops && a.area.specialChance > 0) {
+          const tw = tbl.totalWeight || tbl.drops.reduce((t, d) => t + d.weight, 0);
+          const base = () => (Number(a.area.specialChance) + Number(mods().bonusFishingSpecialChance ?? 0)) / 100;
+          for (const d of tbl.drops) {
+            if (!d?.item) continue;
+            out.push({ id: d.item.id, pct: () => base() * 100 * (d.weight / tw) });
+            const inner = d.item.dropTable?.drops;
+            if (inner) { const itw = d.item.dropTable.totalWeight || inner.reduce((t, x) => t + x.weight, 0); for (const x of inner) if (x?.item) out.push({ id: x.item.id, pct: () => base() * 100 * (d.weight / tw) * (x.weight / itw) }); }
+          }
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return out;
+  };
   // ---------- recipe index (built on first use) ----------
   let idx = null;
   const buildIndex = () => {
@@ -83,6 +116,7 @@ export function setup(ctx) {
         if (a.product) push(isCraft ? idx.crafters : idx.gatherers, a.product.id, { skill, a });
         for (const rp of a.randomProducts ?? []) if (rp?.id) push(idx.randoms, rp.id, { skill, a });
         if (skill.id === ASTRO_ID && (!a.realm || a.realm.id === MELVOR_REALM)) for (const ri of a.randomItems ?? []) if (ri?.id) push(idx.randoms, ri.id, { skill, a });
+        for (const x of specialDrops(skill, a)) push(idx.randoms, x.id, { skill, a, pct: x.pct });
       }
     }
     for (const m of list(game.monsters)) {
@@ -227,7 +261,8 @@ export function setup(ctx) {
     for (const x of idx.randoms.get(item.id) ?? []) {
       if (x.skill.id === ASTRO_ID || (x.a.realm && x.a.realm.id !== MELVOR_REALM)) continue;
       let chance = 0;
-      try { chance = Number(x.skill.getRandomProductInfo?.(item)?.chance ?? 0); } catch (e) { /* ignore */ }
+      if (x.pct) { try { chance = Number(x.pct()); } catch (e) { /* ignore */ } }
+      if (!(chance > 0)) try { chance = Number(x.skill.getRandomProductInfo?.(item)?.chance ?? 0); } catch (e) { /* ignore */ }
       if (!(chance > 0)) { try { chance = Number(x.skill.randomProducts?.get?.(item)?.chance ?? 0); } catch (e) { /* ignore */ } }
       if (!(chance > 0)) continue;
       const ms = intervalMs(x.skill, x.a);
@@ -1004,7 +1039,7 @@ export function setup(ctx) {
     const a = actionById(skill, e.actionId);
     if (!a) return null;
     if (skill.id === ASTRO_ID && e.itemId) { const r = astroPerHour(skill, a, itemById(e.itemId)); return r > 0 ? 3600000 / r : null; }
-    if (e.kind === "gather" && e.itemId && a.product && a.product.id !== e.itemId) { const o = farmSkills(itemById(e.itemId)).find((x) => x.a === a); return o && o.perHr > 0 ? 3600000 / o.perHr : null; }
+    if (e.kind === "gather" && e.itemId && (!a.product || a.product.id !== e.itemId)) { const o = farmSkills(itemById(e.itemId)).find((x) => x.a === a); return o && o.perHr > 0 ? 3600000 / o.perHr : null; }
     const ms = intervalMs(skill, a);
     if (e.kind === "gather") return ms / Math.max(1, a.baseQuantity ?? 1);
     const opt = options(a)[e.altIndex ?? 0];
