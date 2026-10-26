@@ -1153,7 +1153,7 @@ export function setup(ctx) {
           Queue.save();
           if (cur.kind !== "manual") {
             const r = startEntry(cur);
-            if (!r.ok) {
+            if (!r.ok && !(cur.kind === "xp" && r.noMaterials)) { // an XP step with no materials is handled just below: it adds the steps to get them
               if (r.transient) { this.message = r.reason; Panel.render(); return; }
               this.block(cur, r.reason);
               return;
