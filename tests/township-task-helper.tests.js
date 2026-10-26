@@ -78,7 +78,9 @@
       th.panel.close();
     }
   };
-  const popupReady = () => waitFor(() => document.querySelector(".swal2-actions")?.style.display === "flex", 3000, 50);
+  // SweetAlert shows the popup first; the mod's own setup (button styling and click handlers) runs in didOpen right after.
+  // Its last visible trace is the Close button's min-width.
+  const popupReady = () => waitFor(() => document.querySelector(".swal2-confirm")?.style.minWidth === "84px", 3000, 25);
   const liveOk = () => { if (document.hidden) skip("the game tab is hidden, so the game is paused"); };
 
   // =====================================================================================
@@ -661,7 +663,7 @@
   const open = async (skillName, goal) => {
     D().TS.skillId = "melvorD:" + skillName; D().TS.goal = goal ?? "level"; D().TS.make = null; D().TS.level = null; D().TS.forced = "";
     D().openTrain();
-    await sleep(100);
+    ok(await popupReady(), "popup never finished opening");
   };
   const setv = (id, v, type = "change") => { const e = document.getElementById(id); if (e.type === "checkbox") e.checked = v; else e.value = v; e.dispatchEvent(new Event(type, { bubbles: true })); };
   test(U, "opens from the minibar button with a skill list and a live preview", () => sandbox(async () => {
@@ -670,7 +672,7 @@
     const sel = document.getElementById("mbd-tr-skill");
     ok(sel, "popup");
     ok(sel.options.length >= TRAINABLE.length, "skills listed");
-    has(document.getElementById("mbd-tr-prev").innerText, "XP/hour");
+    has(document.getElementById("mbd-tr-prev").textContent, "XP/hour");
   }));
   test(U, "level goal queues one train step", () => sandbox(async () => {
     await open("Woodcutting");
@@ -703,7 +705,7 @@
     await open("Smithing", "make");
     setv("mbd-tr-item", "melvorD:Bronze_Bar");
     setv("mbd-tr-qty", "20", "input");
-    has(document.getElementById("mbd-tr-prev").innerText, "Make 20 Bronze Bar");
+    has(document.getElementById("mbd-tr-prev").textContent, "Make 20 Bronze Bar");
     document.querySelector(".swal2-deny").click();
     await sleep(100);
     const bar = TH().queue.items.find((e) => e.kind === "craft");
@@ -717,7 +719,7 @@
     captureNotices();
     await open("Smithing", "make");
     setv("mbd-tr-item", hard.id);
-    has(document.getElementById("mbd-tr-prev").innerText, "Warning");
+    has(document.getElementById("mbd-tr-prev").textContent, "Warning");
     document.querySelector(".swal2-deny").click();
     await sleep(100);
     eq(TH().queue.items.length, 0);
@@ -727,7 +729,7 @@
     setv("mbd-tr-skill", "melvorD:Mining");
     await sleep(50);
     eq(D().TS.skillId, "melvorD:Mining");
-    has(document.getElementById("mbd-tr-method").innerText, "Best available");
+    has(document.getElementById("mbd-tr-method").textContent, "Best available");
   }));
   test(U, "queued level goals expand into steps when run", () => sandbox(async () => {
     liveOk();
