@@ -2,7 +2,11 @@
 
 # Township Task Helper
 
-Township tasks take a lot of planning. Which ore, how many bars, which arrows, which monster, what level. Township Task Helper does the planning for you, then does the grinding too.
+Township tasks take a lot of planning. Which ore, how many bars, which arrows, which monster, what level. Township Task Helper plans every task for you, then hands it to the Action Queue so you don't have to sit there and grind.
+
+## Getting started
+
+Open Township and go to your task list. Every requirement has a green play button next to it. Click one and you're in.
 
 ## One click, full plan
 
@@ -32,7 +36,7 @@ To try it from source, zip `manifest.json` and `setup.mjs` (both at the top leve
 
 ## Bugs and ideas
 
-Open an issue. For a bug, say which task or item it happened on and what you expected to see.
+Found a bug or have an idea? Open an issue. For a bug, say which task or item it happened on and what you expected to see.
 
 ## License
 
