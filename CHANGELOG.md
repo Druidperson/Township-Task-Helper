@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.9.2
+- XP tasks no longer suggest a method you can't actually feed. If the best XP per hour needs materials you can't get yet (the ore needs a Mining level you don't have, for example), it is skipped and the best method you can really do is picked. Materials count if they are in your bank or you have the levels to gather, craft, buy or farm them.
+
 ## 0.9.1
 - The breakdown and the queue now count what's in your bank. Steps you already have enough for are skipped, and partly owned items only make the rest (250 air runes with 100 in the bank queues 150 rune essence and 150 crafts). If you already have everything, the popup says so.
 

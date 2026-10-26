@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.9.1";
+  const VERSION = "0.9.2";
   const LOG = (...a) => console.log("[Township Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => String(o?.name ?? o?._name ?? o?._localID ?? o?.id ?? "?");
@@ -573,6 +573,40 @@ export function setup(ctx) {
     }
     return owns(a.itemCosts) ? 0 : null;
   };
+  // can the player get this item with the levels they have now? (bank, gathering, shop, monster drops, or crafting it from such things)
+  const obtCache = { t: 0, m: new Map() };
+  const obtainableRaw = (item, seen, depth) => {
+    if (!item) return false;
+    if ((have(item) ?? 0) > 0) return true;
+    buildIndex();
+    const id = item.id;
+    if (seen.has(id) || depth > 6) return false;
+    seen.add(id);
+    const lvlOk = (x) => (x.a.level ?? 1) <= x.skill.level;
+    if (idx.gatherers.get(id)?.some(lvlOk) || idx.randoms.get(id)?.some(lvlOk)) return true;
+    try { if (idx.shop.get(id)?.some((p) => game.checkRequirements(p.purchaseRequirements))) return true; } catch (e) { /* ignore */ }
+    try { if (idx.droppers.get(id)?.some((m) => areaFor(m) && !areaMissing(m).length)) return true; } catch (e) { /* ignore */ }
+    for (const c of idx.crafters.get(id) ?? []) {
+      if (!lvlOk(c)) continue;
+      if (options(c.a).some((o) => [...baseCosts(c.a), ...o.costs].every((k) => !k?.item || obtainableRaw(k.item, new Set(seen), depth + 1)))) return true;
+    }
+    return false;
+  };
+  const obtainable = (item) => {
+    const now = Date.now();
+    if (now - obtCache.t > 5000) { obtCache.m.clear(); obtCache.t = now; }
+    if (!item) return false;
+    if (!obtCache.m.has(item.id)) obtCache.m.set(item.id, obtainableRaw(item, new Set(), 0));
+    return obtCache.m.get(item.id);
+  };
+  const feasibleOption = (a) => {
+    if (a.log) return obtainable(a.log) ? 0 : null;
+    if (a.alternativeCosts?.length) {
+      const i = a.alternativeCosts.findIndex((o) => [...baseCosts(a), ...(o.itemCosts ?? [])].every((k) => !k?.item || obtainable(k.item)));
+      return i >= 0 ? i : null;
+    }
+    return baseCosts(a).every((k) => !k?.item || obtainable(k.item)) ? 0 : null;
+  };
   const needsInputs = (a) => !!a.log || (Array.isArray(a.itemCosts) && a.itemCosts.length > 0) || (a.alternativeCosts?.length ?? 0) > 0;
   // best first. With ignoreMaterials, crafting skills are ranked even if the bank can't pay for them.
   const xpCandidates = (skill, ignoreMaterials = false) => {
@@ -582,9 +616,13 @@ export function setup(ctx) {
       if ((a.level ?? 1) > skill.level || !(a.baseExperience > 0)) continue;
       let altIndex = 0;
       if (needsInputs(a)) {
-        const opt = affordableOption(a);
-        if (opt === null && !ignoreMaterials) continue;
-        altIndex = opt ?? 0;
+        let opt = affordableOption(a);
+        if (opt === null) {
+          if (!ignoreMaterials) continue;
+          opt = feasibleOption(a);
+          if (opt === null) continue;
+        }
+        altIndex = opt;
       }
       out.push({ a, altIndex, rate: xpRate(skill, a) });
     }
@@ -604,12 +642,12 @@ export function setup(ctx) {
     if (left <= 0) return html;
     const ready = xpCandidates(skill);
     const all = ready.length ? ready : xpCandidates(skill, true);
-    if (!all.length) return html + `<div class="mbd-place">Nothing found that you can train at your level.</div>`;
+    if (!all.length) return html + `<div class="mbd-place">Nothing found that you can train with your current levels and materials.</div>`;
     const best = all[0];
     html += `<div class="mbd-step"><div class="mbd-stepno">Fastest method right now</div>` +
       `<div class="mbd-title">${icon(best.a.product ?? best.a.log)}<b>${esc(nm(best.a))}</b></div>` +
       `<div class="mbd-chips">${chip(`Level ${best.a.level ?? 1}`)}${chip(`${num(Math.round(best.rate))} XP/hour`)}${chip(`About ${fmtTime(left / best.rate)}`, "ok", "Base XP only, ignoring mastery and other bonuses")}</div>` +
-      (!ready.length ? `<div class="mbd-chips">${chip("You don't have the materials for this in your bank yet", "warn")}</div>` : "") + `</div>`;
+      (!ready.length ? `<div class="mbd-chips">${chip("You don't have the materials for this in your bank yet. You do have the levels to get them.", "warn")}</div>` : "") + `</div>`;
     if (all.length > 1) {
       html += `<div class="mbd-sec">Next best</div><div class="mbd-chips">` + all.slice(1, 4).map((c) => chip(`${esc(nm(c.a))} &middot; ${num(Math.round(c.rate))}/h`)).join("") + `</div>`;
     }
