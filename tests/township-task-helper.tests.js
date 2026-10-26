@@ -902,11 +902,14 @@
   }));
   test(F, "auto eat efficiency shrinks how far your food goes", () => sandbox(async () => {
     withFood(40, 100, { at: 1e9, eff: 100 });
-    const full = gentle(D().farmFights(bones(), 300)).find((f) => f.safety.have !== undefined);
-    ok(full, "no gentle monster");
+    const probe = gentle(D().farmFights(bones(), 300)).find((f) => f.safety.need > 0);
+    ok(probe, "no gentle monster");
+    const kills = Math.max(1, Math.floor((300 * 30) / probe.safety.need)); // a farm that needs about 30 of your 40 food
+    const full = D().farmFights(bones(), kills).find((f) => f.m === probe.m);
+    eq(full.safety.safe, true, "full efficiency");
     withFood(40, 100, { at: 1e9, eff: 25 });
-    const weak = D().farmFights(bones(), 300).find((f) => f.m === full.m);
-    ok(weak.safety.have < full.safety.have, "25% efficiency should cover fewer kills");
+    const weak = D().farmFights(bones(), kills).find((f) => f.m === probe.m);
+    eq(weak.safety.safe, false, "25% efficiency");
   }));
   test(F, "a farm bigger than your food supply is not safe", () => sandbox(async () => {
     withFood(1, 1000);
