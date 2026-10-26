@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.9.1
+- The breakdown and the queue now count what's in your bank. Steps you already have enough for are skipped, and partly owned items only make the rest (250 air runes with 100 in the bank queues 150 rune essence and 150 crafts). If you already have everything, the popup says so.
+
 ## 0.9.0
 - Auto-start is now a toggle in the Action Queue title bar, to the left of the title. Hover it to see "Auto-start: On" or "Off".
 - If you don't meet the requirements for a task, the popup now shows warnings like "Warning: 88 Fletching required for Arrow Shafts" instead of the step list, and the queue buttons are hidden. This covers skill levels and monster area requirements such as Slayer level or a required item.

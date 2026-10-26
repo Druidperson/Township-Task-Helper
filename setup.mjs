@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.9.0";
+  const VERSION = "0.9.1";
   const LOG = (...a) => console.log("[Township Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => String(o?.name ?? o?._name ?? o?._localID ?? o?.id ?? "?");
@@ -215,15 +215,38 @@ export function setup(ctx) {
     buildIndex();
     const nodes = new Map();
     explode(item, qty, 0, new Set(), nodes);
-    return [...nodes.values()].sort((a, b) => b.depth - a.depth || nm(a.item).localeCompare(nm(b.item)));
+    // second pass, parents before children: what the bank already holds is used first, and only the rest is made
+    const demand = new Map([[item.id, qty]]);
+    const rows = [];
+    for (const n of [...nodes.values()].sort((a, b) => a.depth - b.depth)) {
+      const need = demand.get(n.item.id) ?? 0;
+      if (need <= 0) continue;
+      const owned = have(n.item) ?? 0;
+      const make = Math.max(0, need - owned);
+      n.need = need;
+      n.qty = make;
+      if (n.recipe) {
+        const { c, opt } = n.recipe;
+        const per = Math.max(1, (c.a.baseQuantity ?? 1) * opt.mult);
+        const crafts = Math.ceil(make / per);
+        n.recipe = { c, opt, crafts };
+        if (make > 0) {
+          for (const cost of [...baseCosts(c.a), ...opt.costs]) {
+            if (cost?.item) demand.set(cost.item.id, (demand.get(cost.item.id) ?? 0) + cost.quantity * crafts);
+          }
+        }
+      }
+      if (make > 0) rows.push(n);
+    }
+    return rows.sort((a, b) => b.depth - a.depth || nm(a.item).localeCompare(nm(b.item)));
   };
 
   const itemSection = (item, qty) => {
     const rows = buildRows(item, qty);
+    if (!rows.length) return `<div class="mbd-step"><div class="mbd-chips">${chip(`<i class="fa fa-check"></i> You already have enough in your bank`, "ok")}</div></div>`;
     return rows.map((n, i) => {
       const owned = have(n.item);
-      const ok = owned !== null && owned >= n.qty;
-      const haveChip = owned === null ? "" : chip(ok ? `<i class="fa fa-check"></i> Have ${num(owned)}` : `You have ${num(owned)}`, ok ? "ok" : "");
+      const haveChip = owned === null ? "" : chip(`You have ${num(owned)}${n.need !== undefined ? ` of ${num(n.need)} needed` : ""}`);
       let title, chips;
       if (n.recipe) {
         const { c, opt, crafts } = n.recipe;
@@ -236,7 +259,7 @@ export function setup(ctx) {
           (lvlChip(c.skill, c.a) ? `<div class="mbd-chips">${lvlChip(c.skill, c.a)}</div>` : "");
       } else {
         title = `${icon(n.item)}<b>${esc(nm(n.item))}</b> &times;${num(n.qty)}`;
-        chips = `<div class="mbd-chips">${haveChip}</div>` + sourceHtml(n.item.id) + buyHtml(n.item.id, Math.max(0, n.qty - (owned ?? 0))) + lvlWarn(n.item.id);
+        chips = `<div class="mbd-chips">${haveChip}</div>` + sourceHtml(n.item.id) + buyHtml(n.item.id, n.qty) + lvlWarn(n.item.id);
       }
       return `<div class="mbd-step"><div class="mbd-stepno">Step ${i + 1}</div><div class="mbd-title">${title}</div>${chips}</div>`;
     }).join("");
@@ -253,7 +276,7 @@ export function setup(ctx) {
       }
       const g = idx.gatherers.get(n.item.id)?.[0];
       if (g) return { ...base, kind: "gather", skillId: g.skill.id, actionId: g.a.id, label: `${nm(g.skill)}: gather ${nm(n.item)}` };
-      return { ...base, kind: "manual", label: `Get ${nm(n.item)}`, note: plain(sourceText(n.item.id)) };
+      return { ...base, qty: n.need ?? n.qty, kind: "manual", label: `Get ${nm(n.item)}`, note: plain(sourceText(n.item.id)) };
     });
 
   const AREA_KINDS = [
@@ -1070,7 +1093,7 @@ export function setup(ctx) {
         title: `${goal.quantity.toLocaleString()} x ${esc(nm(goal.item))}`,
         body: () => { const miss = itemMissing(goal.item, goal.quantity); return miss.length ? missingHtml(miss) : itemSection(goal.item, goal.quantity); },
         queue: () => (itemMissing(goal.item, goal.quantity).length ? [] : toEntries(buildRows(goal.item, goal.quantity))),
-        blocked: () => itemMissing(goal.item, goal.quantity).length > 0,
+        blocked: () => itemMissing(goal.item, goal.quantity).length > 0 || !buildRows(goal.item, goal.quantity).length,
       };
     }
     if (type === "TownshipSkillXPGoal" && goal.skill) {
@@ -1193,7 +1216,7 @@ export function setup(ctx) {
       showItem: (id, qty = 1) => {
         const it = itemById(id);
         const miss = itemMissing(it, qty);
-        fire(`${qty} x ${esc(nm(it))}`, () => (itemMissing(it, qty).length ? missingHtml(itemMissing(it, qty)) : itemSection(it, qty)), miss.length ? null : (top) => {
+        fire(`${qty} x ${esc(nm(it))}`, () => (itemMissing(it, qty).length ? missingHtml(itemMissing(it, qty)) : itemSection(it, qty)), miss.length || !buildRows(it, qty).length ? null : (top) => {
           Queue.add(toEntries(buildRows(it, qty)), top);
           Panel.open();
           if (Settings.autoStart() && Runner.state !== "running") Runner.start();
