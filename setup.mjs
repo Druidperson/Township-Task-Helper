@@ -84,7 +84,7 @@ export function setup(ctx) {
         const tw = game.randomGemTable.totalWeight || game.randomGemTable.drops.reduce((t, d) => t + d.weight, 0);
         for (const d of game.randomGemTable.drops) if (d?.item) out.push({ id: d.item.id, pct: () => (1 + Number(mods().miningGemChance ?? 0)) * (1 + Number(mods().offItemChance ?? 0) / 100) * (d.weight / tw) });
       } else if (skill.id === "melvorD:Thieving") {
-        for (const r of list(skill.generalRareItems)) {
+        for (const r of skill.generalRareItems ?? []) {
           if (!r?.item || (r.npcs && !(r.npcs.has ? r.npcs.has(a) : false))) continue;
           try { if (skill.isCorrectRealmForGeneralRareDrop && !skill.isCorrectRealmForGeneralRareDrop(r, a.realm)) continue; } catch (e) { /* ignore */ }
           out.push({ id: r.item.id, pct: () => { let ok = 1; try { const v = Number(skill.getNPCSuccessRate?.(a)); if (v > 0) ok = v > 1 ? v / 100 : v; } catch (e) { /* ignore */ } return Number(r.chance) * ok; } });
