@@ -28,12 +28,6 @@ Add a plan to the Action Queue and walk away. It gathers, crafts, trains and fig
 - If it can't find where an item comes from, it points you to the wiki
 - Turn on auto-start and the queue begins as soon as you add something
 
-## Install
-
-Subscribe on mod.io from the in-game Mod Manager (Browse tab): https://mod.io/g/melvoridle/m/action-queue
-
-To try it from source, zip `manifest.json` and `setup.mjs` (both at the top level of the zip) and load it as a local mod with the Melvor Creator Toolkit.
-
 ## Bugs and ideas
 
 Found a bug or have an idea? Open an issue. For a bug, say which task or item it happened on and what you expected to see.
