@@ -1039,18 +1039,14 @@
     for (let i = 1; i < lv.length; i++) ok(lv[i] >= lv[i - 1], "not sorted by combat level");
   }));
 
-  test(F, "monsters with no name in the game files get a readable name", () => sandbox(async () => {
+  test(F, "placeholder random-monster slots are not offered as fights", () => sandbox(async () => {
     const odd = list(game.monsters).filter((m) => /undefined translation/i.test(String(m.name)));
     if (!odd.length) skip("every monster has a name");
-    for (const m of odd) {
-      const it = list(m.lootTable?.drops ?? []).map((d) => d.item).find(Boolean);
-      if (!it) continue;
-      const html = D().farmHtml(it, 1);
-      ok(!/undefined translation/i.test(html), "the picker still shows the placeholder name for " + m.id);
-      has(html, "Random monster");
-    }
+    const fights = D().farmFights(bones(), 1);
+    ok(fights.length > 3, "bones should still drop from many monsters");
+    ok(fights.every((f) => !odd.includes(f.m)), "a placeholder slot was offered");
+    ok(!/undefined translation/i.test(D().farmHtml(bones(), 5)), "the placeholder name leaked into the picker");
   }));
-
   // =====================================================================================
   const run = async (opts = {}) => {
     const { live = true, group = null, only = null } = opts;

@@ -296,7 +296,7 @@ export function setup(ctx) {
     const task = slayerTaskNow();
     const out = [];
     for (const m of idx.droppers.get(item.id) ?? []) {
-      if (!areaFor(m)) continue;
+      if (!areaFor(m) || /^UNDEFINED TRANSLATION/i.test(String(m.name))) continue; // placeholder "random monster" slots have no real stats, so they are not offered
       const perKill = dropPerKill(m, item);
       if (!(perKill > 0)) continue;
       let open = true;
