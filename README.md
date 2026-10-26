@@ -23,6 +23,8 @@ Open the queue from the menu at the bottom right. From any breakdown you can add
 - Combat tasks show the enemy's attack styles and weaknesses, your food, and an equipment set switcher
 - Combat tasks can be queued too: it fights the monster and counts the kills
 - Warnings when you're missing a level, and a Buy button for shop items
+- Warnings instead of steps when you don't meet a task's requirements
+- Extras the queue makes are sold automatically (can be turned off)
 - A setting to start the queue automatically when you add a task
 - Drag the panel anywhere, and a progress bar shows the estimated time left
 - A "Do this first" button on each row runs that entry now without moving it in the list

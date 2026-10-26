@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.8.0";
+  const VERSION = "0.9.0";
   const LOG = (...a) => console.log("[Township Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => String(o?.name ?? o?._name ?? o?._localID ?? o?.id ?? "?");
@@ -19,17 +19,21 @@ export function setup(ctx) {
   // ---------- settings ----------
   // As a Melvor mod, the switch lives in the mod settings menu (ctx.settings). It is also on the queue panel,
   // and falls back to localStorage if the settings API isn't there (userscript use).
-  const AUTO_KEY = "mbd-th-autostart";
+  const KEYS = { autoStart: ["mbd-th-autostart", false], autoSell: ["mbd-th-autosell", true] };
   const Settings = {
     api: null,
-    autoStart() {
-      try { if (this.api) return !!this.api.get("autoStart"); } catch (e) { /* use fallback */ }
-      try { return localStorage.getItem(AUTO_KEY) === "1"; } catch (e) { return false; }
+    get(name) {
+      try { if (this.api) { const v = this.api.get(name); if (v !== undefined && v !== null) return !!v; } } catch (e) { /* use fallback */ }
+      try { const raw = localStorage.getItem(KEYS[name][0]); if (raw !== null) return raw === "1"; } catch (e) { /* ignore */ }
+      return KEYS[name][1];
     },
-    setAutoStart(v) {
-      try { if (this.api) this.api.set("autoStart", !!v); } catch (e) { console.warn("[Township Helper] settings", e); }
-      try { localStorage.setItem(AUTO_KEY, v ? "1" : "0"); } catch (e) { /* ignore */ }
+    set(name, v) {
+      try { if (this.api) this.api.set(name, !!v); } catch (e) { console.warn("[Township Helper] settings", e); }
+      try { localStorage.setItem(KEYS[name][0], v ? "1" : "0"); } catch (e) { /* ignore */ }
     },
+    autoStart() { return this.get("autoStart"); },
+    setAutoStart(v) { this.set("autoStart", v); },
+    autoSell() { return this.get("autoSell"); },
   };
   if (typeof ctx !== "undefined" && ctx?.settings) {
     try {
@@ -40,6 +44,13 @@ export function setup(ctx) {
         label: "Automatically start the Action Queue when adding a task",
         hint: "When on, adding a task to the queue starts the queue right away. When off, you press Start yourself.",
         default: false,
+      });
+      section.add({
+        type: "switch",
+        name: "autoSell",
+        label: "Automatically sell extras the queue makes",
+        hint: "When a step makes more than the task needs (like arrowtips crafted in batches), the extra is sold. It never sells anything you already owned.",
+        default: true,
       });
       Settings.api = section;
     } catch (e) { console.warn("[Township Helper] could not register settings", e); }
@@ -159,6 +170,46 @@ export function setup(ctx) {
         (ok ? "" : `<div class="mbd-chips">${chip("You can't afford this yet, or it's locked", "warn")}</div>`);
     } catch (e) { console.warn("[Township Helper] shop button", e); return ""; }
   };
+
+  const reqText = (r) => {
+    try {
+      if (r.type === "SkillLevel") return `${r.level} ${nm(r.skill)}`;
+      if (r.type === "DungeonCompletion") return `${nm(r.dungeon)} completed${r.count > 1 ? ` ${r.count} times` : ""}`;
+      if (r.type === "ShopPurchase") return `${nm(r.purchase)} (from the shop)`;
+      if (r.type === "SlayerItem") return `${nm(r.item)} equipped`;
+    } catch (e) { /* fall through */ }
+    return String(r.type ?? "an unmet requirement").replace(/([a-z])([A-Z])/g, "$1 $2");
+  };
+  const areaMissing = (m) => {
+    const a = areaFor(m);
+    const out = [];
+    for (const r of a?.entryRequirements ?? []) {
+      try { if (!game.checkRequirement(r)) out.push({ text: reqText(r), forName: nm(m) }); } catch (e) { /* ignore */ }
+    }
+    return out;
+  };
+  const itemMissing = (item, qty) => {
+    const out = [];
+    for (const n of buildRows(item, qty)) {
+      if (n.recipe) {
+        const { c } = n.recipe;
+        if ((c.a.level ?? 1) > c.skill.level) out.push({ text: `${c.a.level} ${nm(c.skill)}`, forName: nm(n.item) });
+        continue;
+      }
+      const id = n.item.id;
+      if (idx.shop.get(id)) continue;
+      const opts = [...(idx.gatherers.get(id) ?? []), ...(idx.randoms.get(id) ?? [])];
+      if (!opts.length || opts.some((x) => (x.a.level ?? 1) <= x.skill.level)) continue;
+      const best = opts.reduce((m, x) => ((x.a.level ?? 1) - x.skill.level < (m.a.level ?? 1) - m.skill.level ? x : m));
+      out.push({ text: `${best.a.level ?? 1} ${nm(best.skill)}`, forName: nm(n.item) });
+    }
+    const seen = new Set();
+    return out.filter((x) => { const k = x.text + "|" + x.forName; if (seen.has(k)) return false; seen.add(k); return true; });
+  };
+  const missingHtml = (miss) =>
+    `<div class="mbd-step">` +
+    miss.map((x) => `<div class="mbd-chips">${chip(`<i class="fa fa-exclamation-triangle"></i>&nbsp;Warning: ${esc(x.text)} required for ${esc(x.forName)}`, "warn")}</div>`).join("") +
+    `<div class="mbd-note">You can't queue this until you meet the requirements.</div></div>`;
 
   const buildRows = (item, qty) => {
     buildIndex();
@@ -343,7 +394,7 @@ export function setup(ctx) {
         const sz = { height: "36px", padding: "0 16px", "font-size": "14px", "line-height": "1", "box-sizing": "border-box", display: "inline-flex", "align-items": "center", "justify-content": "center", "box-shadow": "none", outline: "none", margin: "0" };
         for (const [sel, o] of Object.entries(ord)) {
           const el = popup?.querySelector?.(sel);
-          if (!el) continue;
+          if (!el || (!onQueue && sel !== ".swal2-confirm")) continue;
           el.style.order = o;
           for (const [k, v] of Object.entries(sz)) el.style.setProperty(k, v, "important");
           if (sel === ".swal2-confirm") el.style.setProperty("min-width", "84px", "important");
@@ -707,7 +758,22 @@ export function setup(ctx) {
       Queue.save();
       this.setState("paused", `Stopped at "${entry.label}": ${reason}. Fix it, then press Start.`);
     },
+    sellExtra(entry) {
+      try {
+        if (!Settings.autoSell() || (entry.kind !== "craft" && entry.kind !== "gather") || entry.startQty === undefined) return;
+        const item = itemById(entry.itemId);
+        if (!item || !(item.sellsFor?.quantity > 0)) return;
+        const bi = game.bank.items.get(item);
+        if (!bi || bi.locked) return;
+        const extra = Math.min(bi.quantity, bi.quantity - entry.startQty - entry.qty);
+        if (!(extra >= 1)) return;
+        const price = game.bank.getItemSalePrice(item, extra);
+        game.bank.processItemSale(item, extra);
+        entry.sold = `Sold ${extra.toLocaleString()} extra for ${price.toLocaleString()} ${nm(item.sellsFor.currency)}`;
+      } catch (e) { console.warn("[Township Helper] auto-sell", e); }
+    },
     finish(entry) {
+      this.sellExtra(entry);
       entry.status = "done";
       delete entry.reason;
       delete entry.started;
@@ -872,6 +938,7 @@ export function setup(ctx) {
         else if (act === "stop") Runner.stop();
         else if (act === "first") Runner.doFirst(id);
         else if (act === "autostart") { Settings.setAutoStart(!Settings.autoStart()); this.last = ""; this.render(); }
+        else if (act === "autosell") { Settings.set("autoSell", !Settings.autoSell()); this.last = ""; this.render(); }
       });
       window.addEventListener("resize", () => {
         if (this.el && this.el.style.left) { const r = this.el.getBoundingClientRect(); this.place(r.left, r.top); }
@@ -897,7 +964,8 @@ export function setup(ctx) {
       const amount = isCombat ? `<b>${Runner.gained(e).toLocaleString()} / ${Number(e.targetKills).toLocaleString()} kills</b>` : isXp ? `<b>${Runner.gained(e).toLocaleString()} / ${Number(e.targetXp).toLocaleString()} XP</b>` : showProgress ? `<b>${Runner.gained(e).toLocaleString()} / ${Number(e.qty).toLocaleString()}</b>` : `<b>x${Number(e.qty).toLocaleString()}</b>`;
       const btn = (act, ic, title) =>
         `<a data-act="${act}" data-id="${esc(e.id)}" class="pointer-enabled text-white-50 ml-2" title="${title}"><i class="fa ${ic}"></i></a>`;
-      const sub = e.reason ? `<br><small class="text-warning">${esc(e.reason)}</small>`
+      const sub = done && e.sold ? `<br><small class="text-muted">${esc(e.sold)}</small>`
+        : e.reason ? `<br><small class="text-warning">${esc(e.reason)}</small>`
         : issue ? `<br><small class="text-warning"><i class="fa fa-exclamation-triangle"></i> ${esc(issue)}</small>`
         : isXp && e.status === "active" && e.method ? `<br><small class="text-muted">using ${esc(e.method)}</small>`
         : manual && !done ? `<br><small class="text-muted">do this yourself${e.status === "waiting" ? " (waiting for you)" : ""}</small>` : "";
@@ -927,9 +995,13 @@ export function setup(ctx) {
           (eta.unknown ? ` <span class="text-muted">(some steps can't be estimated)</span>` : "");
       const b = (act, label, ic, cls, disabled) =>
         `<button class="btn btn-sm ${cls}" data-act="${act}" ${disabled ? "disabled" : ""} style="padding:2px 10px"><i class="fa ${ic} mr-1"></i>${label}</button>`;
+      const asOn = Settings.autoStart(), slOn = Settings.autoSell();
+      const toggles =
+        `<a data-act="autostart" class="pointer-enabled mr-2" title="Auto-start: ${asOn ? "On" : "Off"}" style="font-size:19px;line-height:1;${asOn ? "color:#30c78d" : "opacity:.45"}"><i class="fa ${asOn ? "fa-toggle-on" : "fa-toggle-off"}"></i></a>` +
+        `<a data-act="autosell" class="pointer-enabled mr-2" title="Auto-sell extras: ${slOn ? "On" : "Off"}" style="font-size:15px;line-height:1;${slOn ? "color:#e5ae67" : "opacity:.45"}"><i class="fa fa-dollar-sign"></i></a>`;
       const html =
         `<div data-drag style="display:flex;align-items:center;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.12);cursor:move;user-select:none;touch-action:none" title="Drag to move">` +
-        `<i class="fa fa-grip-vertical mr-2" style="opacity:.4"></i><b style="flex:1">Action Queue</b><span class="text-muted mr-2">${pending} action${pending === 1 ? "" : "s"} left</span>` +
+        `<i class="fa fa-grip-vertical mr-2" style="opacity:.4"></i>${toggles}<b style="flex:1">Action Queue</b><span class="text-muted mr-2">${pending} action${pending === 1 ? "" : "s"} left</span>` +
         `<a data-act="close" class="pointer-enabled text-white" title="Close"><i class="fa fa-times"></i></a></div>` +
         `<div data-list style="overflow:auto;padding:4px 10px;flex:1">` +
         (q.length ? q.map((e) => this.row(e)).join("") : `<div class="text-muted py-3 text-center">Nothing queued yet.<br>Open a Township task's play button and choose "Add to queue" or "Add to top".</div>`) +
@@ -948,11 +1020,6 @@ export function setup(ctx) {
         `<div style="display:flex;justify-content:center;gap:6px;margin-top:6px">` +
         b("cleardone", "Clear Queue", "fa-check", "btn-secondary", !q.some((e) => e.status === "done")) +
         b("clear", "Clear All", "fa-trash", "btn-outline-danger", q.length === 0) +
-        `</div>` +
-        `<div style="display:flex;justify-content:center;margin-top:6px">` +
-        (Settings.autoStart()
-          ? b("autostart", "Auto-start: On", "fa-toggle-on", "btn-success", false)
-          : b("autostart", "Auto-start: Off", "fa-toggle-off", "btn-outline-secondary", false)) +
         `</div></div>`;
       if (html === this.last) return;
       const prev = this.el.querySelector("[data-list]");
@@ -1001,8 +1068,9 @@ export function setup(ctx) {
     if (type === "TownshipItemGoal" && goal.item) {
       return {
         title: `${goal.quantity.toLocaleString()} x ${esc(nm(goal.item))}`,
-        body: () => itemSection(goal.item, goal.quantity),
-        queue: () => toEntries(buildRows(goal.item, goal.quantity)),
+        body: () => { const miss = itemMissing(goal.item, goal.quantity); return miss.length ? missingHtml(miss) : itemSection(goal.item, goal.quantity); },
+        queue: () => (itemMissing(goal.item, goal.quantity).length ? [] : toEntries(buildRows(goal.item, goal.quantity))),
+        blocked: () => itemMissing(goal.item, goal.quantity).length > 0,
       };
     }
     if (type === "TownshipSkillXPGoal" && goal.skill) {
@@ -1016,15 +1084,23 @@ export function setup(ctx) {
       };
     }
     if ((type === "TownshipMonsterGoal" || type === "TownshipCasualMonsterGoal") && goal.monster) {
-      return { title: esc(nm(goal.monster)), body: () => monsterSection(goal.monster, goal.quantity), queue: () => killEntry(goal, type === "TownshipMonsterGoal") };
+      return {
+        title: esc(nm(goal.monster)),
+        body: () => { const miss = areaMissing(goal.monster); return (miss.length ? missingHtml(miss) : "") + monsterSection(goal.monster, goal.quantity); },
+        queue: () => (areaMissing(goal.monster).length ? [] : killEntry(goal, type === "TownshipMonsterGoal")),
+        blocked: () => areaMissing(goal.monster).length > 0,
+      };
     }
     if (type === "TownshipMonsterWithItemsGoal" && goal.monster) {
       return {
         title: esc(nm(goal.monster)),
-        body: () =>
-          monsterSection(goal.monster, goal.quantity) +
-          (goal.items ?? []).map((it) => heading(`Equipment needed: ${esc(nm(it))}`) + itemSection(it, 1)).join(""),
-        queue: () => [...(goal.items ?? []).flatMap((it) => toEntries(buildRows(it, 1))), ...killEntry(goal, false)],
+        body: () => {
+          const all = [...areaMissing(goal.monster), ...(goal.items ?? []).flatMap((it) => itemMissing(it, 1))];
+          return (all.length ? missingHtml(all) : "") + monsterSection(goal.monster, goal.quantity) +
+            (all.length ? "" : (goal.items ?? []).map((it) => heading(`Equipment needed: ${esc(nm(it))}`) + itemSection(it, 1)).join(""));
+        },
+        blocked: () => areaMissing(goal.monster).length > 0 || (goal.items ?? []).some((it) => itemMissing(it, 1).length > 0),
+        queue: () => (areaMissing(goal.monster).length || (goal.items ?? []).some((it) => itemMissing(it, 1).length) ? [] : [...(goal.items ?? []).flatMap((it) => toEntries(buildRows(it, 1))), ...killEntry(goal, false)]),
       };
     }
     return null;
@@ -1048,7 +1124,7 @@ export function setup(ctx) {
       ev.preventDefault();
       ev.stopPropagation();
       try {
-        const onQueue = info.queue ? (top) => {
+        const onQueue = info.queue && !info.blocked?.() ? (top) => {
           Queue.add(info.queue(), top);
           Panel.open();
           if (Settings.autoStart() && Runner.state !== "running") Runner.start();
@@ -1116,7 +1192,8 @@ export function setup(ctx) {
       version: VERSION,
       showItem: (id, qty = 1) => {
         const it = itemById(id);
-        fire(`${qty} x ${esc(nm(it))}`, () => itemSection(it, qty), (top) => {
+        const miss = itemMissing(it, qty);
+        fire(`${qty} x ${esc(nm(it))}`, () => (itemMissing(it, qty).length ? missingHtml(itemMissing(it, qty)) : itemSection(it, qty)), miss.length ? null : (top) => {
           Queue.add(toEntries(buildRows(it, qty)), top);
           Panel.open();
           if (Settings.autoStart() && Runner.state !== "running") Runner.start();
@@ -1126,6 +1203,8 @@ export function setup(ctx) {
       queue: Queue,
       panel: Panel,
       runner: Runner,
+      settings: Settings,
+      _dev: { itemMissing, areaMissing, missingHtml, reqText },
     };
     LOG("installed", VERSION);
   };

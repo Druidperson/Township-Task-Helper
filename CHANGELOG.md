@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.0
+- Auto-start is now a toggle in the Action Queue title bar, to the left of the title. Hover it to see "Auto-start: On" or "Off".
+- If you don't meet the requirements for a task, the popup now shows warnings like "Warning: 88 Fletching required for Arrow Shafts" instead of the step list, and the queue buttons are hidden. This covers skill levels and monster area requirements such as Slayer level or a required item.
+- Extras are sold automatically. If a step makes more than the task needs (100 arrowtips needed, crafted in batches of 15 so 105 made), the extra 5 are sold. It only sells what the queue itself made, never items you already owned. The queue row shows what was sold.
+- New $ toggle in the title bar turns auto-sell on or off. It is also in the mod settings.
+
 ## 0.8.0
 - Combat tasks can now be queued. The Action Queue starts the fight in the right combat area and counts kills. If the fight stops (you died or ran out of food), it pauses and tells you.
 - Dungeon and stronghold monsters can't be started by the queue yet, so those pause with a message.
