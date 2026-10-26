@@ -676,6 +676,7 @@
     const sel = document.getElementById("mbd-tr-skill");
     ok(sel, "popup");
     ok(sel.options.length >= TRAINABLE.length, "skills listed");
+    if (sel.value !== "melvorD:Woodcutting") setv("mbd-tr-skill", "melvorD:Woodcutting"); // the popup starts on the skill page you are on
     has(document.getElementById("mbd-tr-prev").textContent, "XP/hour");
   }));
   test(U, "level goal queues one train step", () => sandbox(async () => {
