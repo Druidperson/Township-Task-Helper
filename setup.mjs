@@ -858,6 +858,10 @@ export function setup(ctx) {
           skill.onAreaStartButtonClick(area);
           break;
         }
+        case "melvorD:Thieving":
+          if (!a.area) return { ok: false, reason: "no thieving area found for this target" };
+          skill.startThieving(a.area, a);
+          break;
         case "melvorD:Firemaking":
           if (have(a.log) !== null && have(a.log) < 1) return { ok: false, reason: `no ${nm(a.log)} in the bank` };
           skill.selectLog(a);

@@ -1176,6 +1176,51 @@
   }));
 
   // =====================================================================================
+  const SD = "Skill drops";
+  const itm = (id) => game.items.getObjectByID(id);
+  test(SD, "every gem can be mined for", () => sandbox(async () => {
+    for (const g of ["Topaz", "Sapphire", "Ruby", "Emerald", "Diamond"]) {
+      const it = itm("melvorD:" + g);
+      ok(D().isFarmItem(it), g + " should be a farm item");
+      ok(D().farmSkills(it).some((o) => o.skill.id === "melvorD:Mining" && o.perHr > 0), g + " has no Mining option");
+    }
+  }));
+  test(SD, "gem odds follow the gem table weights", () => sandbox(async () => {
+    const per = (g) => D().farmSkills(itm("melvorD:" + g)).find((o) => o.a.id === "melvorD:Copper_Ore").perHr;
+    ok(per("Topaz") > per("Diamond") * 5, "Topaz should drop far more often than Diamond");
+  }));
+  test(SD, "Bobby's Pocket and Chapeau Noir come from thieving", () => sandbox(async () => {
+    for (const id of ["melvorF:Bobbys_Pocket", "melvorF:Chapeau_Noir"]) {
+      const it = itm(id);
+      ok(D().isFarmItem(it), id + " should be a farm item");
+      const o = D().farmSkills(it);
+      ok(o.length > 5 && o.every((x) => x.skill.id === "melvorD:Thieving"), "should list thieving targets");
+    }
+    ok(D().farmSkills(itm("melvorF:Bobbys_Pocket"))[0].perHr > D().farmSkills(itm("melvorF:Chapeau_Noir"))[0].perHr, "Chapeau Noir is far rarer");
+  }));
+  test(SD, "Amulet of Fishing comes from fishing chests", () => sandbox(async () => {
+    const it = itm("melvorD:Amulet_of_Fishing");
+    ok(D().isFarmItem(it), "should be a farm item");
+    const o = D().farmSkills(it);
+    ok(o.length > 0 && o.every((x) => x.skill.id === "melvorD:Fishing"), "should list fish");
+    ok(o.every((x) => x.perHr > 0 && x.perHr < 1), "chest amulet should be rare");
+  }));
+  test(SD, "a Thieving farm step queues and takes the best target", () => sandbox(async () => {
+    const it = itm("melvorF:Bobbys_Pocket");
+    const items = await farmAdd(it);
+    const e = items[0];
+    ok(e, "nothing queued");
+    eq(e.skillId, "melvorD:Thieving"); eq(e.farm, "best");
+    ok(D().estimateMs(e) > 0, "needs an estimate");
+  }));
+  test(SD, "starting a Thieving step starts thieving", () => sandbox(async () => {
+    const e = { kind: "gather", skillId: "melvorD:Thieving", farm: "best", itemId: "melvorF:Bobbys_Pocket", qty: 1, label: "t" };
+    const r = D().startEntry(e);
+    ok(r.ok, "start failed: " + r.reason);
+    eq(game.activeAction?.id, "melvorD:Thieving");
+    game.stopActiveAction();
+  }), { live: true });
+
   const run = async (opts = {}) => {
     const { live = true, group = null, only = null } = opts;
     const results = [];
