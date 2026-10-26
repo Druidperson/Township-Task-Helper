@@ -1001,6 +1001,34 @@
     TH().runner.stop();
   }), { live: true });
 
+  const RS = "Restocking";
+  const cookShrimp = () => { const sk = skill("Cooking"); const a = list(sk.actions).find((x) => x.product?.id === "melvorD:Shrimp"); return { sk, a }; };
+  const shrimpEntry = (extra) => { const { sk, a } = cookShrimp(); return { id: "c1", kind: "craft", skillId: sk.id, actionId: a.id, altIndex: 0, itemId: "melvorD:Shrimp", qty: 10, startQty: 0, label: "Cooking: make Shrimp", ...extra }; };
+  test(RS, "a craft that came up short asks for just the missing ingredients", () => sandbox(async () => {
+    const { a } = cookShrimp();
+    if (!a) skip("no Shrimp recipe");
+    bankStub((id) => (id === "melvorD:Shrimp" ? 3 : 0)); // 3 cooked, the rest burned, no raw left
+    const r = D().restockCraft(shrimpEntry());
+    ok(r.ok, r.reason);
+    eq(r.remaining, 7);
+    const raw = r.entries.find((x) => x.kind === "gather");
+    ok(raw, "should gather the raw fish again");
+    eq(raw.qty, 7);
+    ok(r.entries.every((x) => x.parent === "c1"), "steps should point at the craft step");
+  }));
+  test(RS, "the runner adds the gathering above a craft that ran out, instead of stopping", () => sandbox(async () => {
+    const { a } = cookShrimp();
+    if (!a) skip("no Shrimp recipe");
+    if ((game.bank.getQty(game.items.getObjectByID("melvorD:Raw_Shrimp")) ?? 0) >= 5) skip("the bank holds raw shrimp, so the craft would start");
+    TH().queue.add([shrimpEntry({ id: undefined })]);
+    TH().runner.start();
+    const items = TH().queue.items;
+    ok(items.length > 1, "no steps were added");
+    eq(items[items.length - 1].kind, "craft");
+    ok(items.every((x) => x.status !== "blocked"), "nothing should be blocked: " + items.map((x) => x.status + ":" + (x.reason ?? "")).join(" | "));
+    TH().runner.stop();
+  }));
+
   // =====================================================================================
   const run = async (opts = {}) => {
     const { live = true, group = null, only = null } = opts;

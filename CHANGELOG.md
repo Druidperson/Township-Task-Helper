@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.13.2
+- Fixed: a craft step that runs out of ingredients no longer stops the whole queue. Cooking burns some food, so 63 raw shrimp can give fewer than 63 cooked. The queue now works out how many are still missing, gathers or makes just that many ingredients again, and carries on. If it keeps running short without making any more, it stops with a note.
+
 ## 0.13.1
 - Fixed: Township XP tasks no longer stop at "you don't have the materials". When the bank can't pay for the best method, the queue now adds the steps to get them first (mine the ore, chop the logs, smelt, craft) and then trains. It works a few levels at a time, so it keeps using your real level and bank.
 - The XP task popup lists what it will gather first.

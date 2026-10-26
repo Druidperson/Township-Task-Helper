@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.13.1";
+  const VERSION = "0.13.2";
   const LOG = (...a) => console.log("[Township Task Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => String(o?.name ?? o?._name ?? o?._localID ?? o?.id ?? "?");
@@ -814,7 +814,7 @@ export function setup(ctx) {
       return { ok: false, reason: "error: " + err.message };
     }
     if (skill.isActive) return { ok: true };
-    return { ok: false, reason: e.kind === "craft" ? "not enough materials (or level too low)" : "the game wouldn't start it" };
+    return { ok: false, noMaterials: e.kind === "craft" && (a.level ?? 1) <= skill.level, reason: e.kind === "craft" ? "not enough materials (or level too low)" : "the game wouldn't start it" };
   };
 
   // ---------- XP goals: pick the fastest XP method the player can use right now ----------
@@ -1153,7 +1153,7 @@ export function setup(ctx) {
           Queue.save();
           if (cur.kind !== "manual") {
             const r = startEntry(cur);
-            if (!r.ok && !(cur.kind === "xp" && r.noMaterials)) { // an XP step with no materials is handled just below: it adds the steps to get them
+            if (!r.ok && !((cur.kind === "xp" || cur.kind === "craft") && r.noMaterials)) { // an XP step with no materials is handled just below: it adds the steps to get them
               if (r.transient) { this.message = r.reason; Panel.render(); return; }
               this.block(cur, r.reason);
               return;
@@ -1246,6 +1246,20 @@ export function setup(ctx) {
         const r = startEntry(cur);
         if (r.ok) { Panel.render(); return; }
         if (r.transient) { this.message = r.reason; Panel.render(); return; }
+        if (r.noMaterials && cur.kind === "craft") {
+          const made = this.gained(cur);
+          if (cur.restockMade !== undefined && made <= cur.restockMade) cur.restockStall = (cur.restockStall ?? 0) + 1; else cur.restockStall = 0;
+          cur.restockMade = made;
+          const rs = restockCraft(cur);
+          if (rs.ok && cur.restockStall < 2) {
+            cur.restocks = (cur.restocks ?? 0) + 1;
+            Queue.insertBefore(cur.id, rs.entries);
+            this.message = `Short of materials for ${nm(itemById(cur.itemId))}: getting ${rs.remaining.toLocaleString()} more worth`;
+            continue;
+          }
+          this.block(cur, `${rs.ok ? "it keeps running out of materials without making more" : rs.reason} (${made.toLocaleString()} of ${Number(cur.qty).toLocaleString()} done)`);
+          return;
+        }
         this.block(cur, `${r.reason} (${this.gained(cur).toLocaleString()} of ${Number(cur.qty).toLocaleString()} done)`);
         return;
       }
@@ -1276,6 +1290,26 @@ export function setup(ctx) {
     if (entries.some((x) => x.kind === "manual")) return { ok: false, reason: `${nm(a)} needs something the queue can't get on its own` };
     for (const x of entries) x.parent = e.id;
     return { ok: true, entries, note: `Getting materials for ${nm(a)}` };
+  };
+  // A craft step ran out of ingredients before it made enough (Cooking burns food, Smithing and others can come up short):
+  // work out what is still missing and the steps that get it
+  const restockCraft = (e) => {
+    const skill = skillById(e.skillId), a = actionById(skill, e.actionId), item = itemById(e.itemId);
+    if (!skill || !a || !item) return { ok: false, reason: "this action wasn't found in your game version" };
+    const opt = options(a)[e.altIndex ?? 0] ?? { costs: [], mult: 1 };
+    const per = Math.max(1, (a.baseQuantity ?? 1) * opt.mult);
+    const remaining = e.qty - Math.max(0, (have(item) ?? 0) - (e.startQty ?? 0));
+    const crafts = Math.max(1, Math.ceil(remaining / per));
+    const entries = [];
+    for (const k of [...baseCosts(a), ...opt.costs]) {
+      if (!k?.item) continue;
+      const need = k.quantity * crafts - (have(k.item) ?? 0);
+      if (need > 0) entries.push(...toEntries(buildRows(k.item, need, true)));
+    }
+    if (!entries.length) return { ok: false, reason: "not enough materials (or level too low)" };
+    if (entries.some((x) => x.kind === "manual")) return { ok: false, reason: `${nm(item)} needs something the queue can't get on its own` };
+    for (const x of entries) x.parent = e.parent ?? e.id;
+    return { ok: true, entries, remaining };
   };
   // ---------- train a skill (no Township task needed) ----------
   // Two goals: make an amount of an item, or train to a level. A level goal never farms blindly: every method is ranked
@@ -1909,7 +1943,7 @@ export function setup(ctx) {
         itemMissing, areaMissing, missingHtml, reqText, buildRows, toEntries, itemSection, sourceHtml, buyHtml, buyFromShop, wikiUrl,
         monsterSection, foodHtml, setsHtml, describeGoal, entryKey, addUnique, dupHtml, tellPlayer, xpCandidates, xpSection, estimateMs,
         startAction, startEntry, killEntry, areaFor, obtainable, fire, openTrain, trainBuild, trainQueue, TS,
-        xpMaterialBatch, trainPlan, trainCands, acquireMs, nextBatch, trainEstimate, fmtDur, Astro, Farm, farmSkills, farmFights, farmPlan, fightSafety, monsterMaxHit, dropPerKill, isFarmItem, farmHtml, astroCons, astroOptions, bestCon, astroHtml, isAstroItem,
+        xpMaterialBatch, restockCraft, trainPlan, trainCands, acquireMs, nextBatch, trainEstimate, fmtDur, Astro, Farm, farmSkills, farmFights, farmPlan, fightSafety, monsterMaxHit, dropPerKill, isFarmItem, farmHtml, astroCons, astroOptions, bestCon, astroHtml, isAstroItem,
       },
     };
     LOG("installed", VERSION);
