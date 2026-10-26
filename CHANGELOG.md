@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.0
+- New: Stardust and Golden Stardust tasks now send you to Astrology, where they drop while you study a constellation. Before, they only showed a wiki link.
+- Astrology also levels other skills, so the popup asks which constellation to study. Pick one on purpose, or leave it on Best XP/hour. Each option shows the skills it boosts and its XP per hour.
+- On Best XP/hour the queue switches to a better constellation by itself when you level up.
+- The estimate uses the real drop chance, and Stardust is never auto-sold since you spend it on constellation upgrades.
+
 ## 0.11.1
 - Fixed: pressing Stop while a manual step was waiting for you left it marked as waiting, so the next Start counted it as done. Stop now puts it back to pending.
 - Fixed: the source and shop lookups no longer depend on another popup having been opened first.

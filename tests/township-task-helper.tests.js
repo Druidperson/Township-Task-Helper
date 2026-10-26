@@ -750,6 +750,7 @@
   const A = "Astrology";
   const nm = (o) => String(o?.name ?? o?._name ?? o?.id);
   const stardust = () => game.items.getObjectByID("melvorF:Stardust");
+  const owned = (it) => game.bank.getQty(it);
   const golden = () => game.items.getObjectByID("melvorF:Golden_Stardust");
   test(A, "Stardust and Golden Stardust are found as Astrology drops", () => sandbox(async () => {
     for (const it of [stardust(), golden()]) {
@@ -766,7 +767,7 @@
     ok(D().astroOptions(stardust()).filter((x) => !x.open).every((x) => x.level > skill("Astrology").level), "locked ones need a higher level");
   }));
   test(A, "the popup offers a constellation picker and keeps the choice", () => sandbox(async () => {
-    TH().showItem("melvorF:Stardust", 5);
+    TH().showItem("melvorF:Stardust", owned(stardust()) + 5);
     ok(await popupReady(), "popup never finished opening");
     const sel = document.querySelector("[data-mbd-astro]");
     ok(sel, "picker missing");
@@ -778,7 +779,7 @@
     has(document.querySelector(".mbd-th-pop").textContent, nm(open.c));
   }));
   test(A, "picking a constellation queues that one", () => sandbox(async () => {
-    TH().showItem("melvorF:Stardust", 5);
+    TH().showItem("melvorF:Stardust", owned(stardust()) + 5);
     ok(await popupReady(), "popup never finished opening");
     const open = D().astroOptions(stardust()).find((x) => x.open);
     const sel = document.querySelector("[data-mbd-astro]");
@@ -792,7 +793,7 @@
     eq(e.actionId, open.c.id); eq(e.constellation, open.c.id); eq(e.itemId, "melvorF:Stardust");
   }));
   test(A, "leaving it on best queues a step that follows the best constellation", () => sandbox(async () => {
-    TH().showItem("melvorF:Stardust", 5);
+    TH().showItem("melvorF:Stardust", owned(stardust()) + 5);
     ok(await popupReady(), "popup never finished opening");
     [...document.querySelectorAll(".swal2-actions button")].find((b) => /Add to queue/.test(b.textContent)).click();
     await sleep(200);
@@ -803,9 +804,9 @@
   }));
   test(A, "the estimate counts studies per Stardust", () => sandbox(async () => {
     const c = D().bestCon(stardust());
-    const ms = D().estimateMs({ kind: "gather", skillId: "melvorD:Astrology", actionId: c.c.id, itemId: "melvorF:Stardust", qty: 10, startQty: 0 });
+    const ms = D().estimateMs({ kind: "gather", skillId: "melvorD:Astrology", actionId: c.c.id, itemId: "melvorF:Stardust", qty: 10, startQty: owned(stardust()) });
     ok(ms > 0 && Number.isFinite(ms), "estimate " + ms);
-    const gold = D().estimateMs({ kind: "gather", skillId: "melvorD:Astrology", actionId: c.c.id, itemId: "melvorF:Golden_Stardust", qty: 10, startQty: 0 });
+    const gold = D().estimateMs({ kind: "gather", skillId: "melvorD:Astrology", actionId: c.c.id, itemId: "melvorF:Golden_Stardust", qty: 10, startQty: owned(golden()) });
     ok(gold > ms, "Golden Stardust is rarer, so it should take longer");
   }));
   test(A, "starting a step studies the constellation", () => sandbox(async () => {

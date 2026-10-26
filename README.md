@@ -16,6 +16,10 @@ Every task in your Township list gets a green play button. Press it and you see 
 
 No task needed. Pick a skill, then either name an item and an amount, or pick a level you want to reach. Make 500 Bronze Bars and the queue mines the ore, smelts it and stops at 500. Aim for Smithing 40 and it works out the quickest way to get there, gathering its own materials along the way. It looks at how long everything really takes, materials included, so you never end up farming ore for hours to make a few points of XP.
 
+## Stardust, handled
+
+Stardust and Golden Stardust drop while you study a constellation in Astrology. When a task needs them, the plan takes you there and asks which constellation you want to study, since each one boosts different skills. Pick the one you care about, or let it use the best XP per hour and switch up as you level.
+
 ## Walk into fights ready
 
 Monster tasks show how the enemy attacks, what it's weak to and where to find it. You can check your food and swap equipment sets without closing the window.
