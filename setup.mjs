@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.9.3";
+  const VERSION = "0.10.0";
   const LOG = (...a) => console.log("[Township Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => String(o?.name ?? o?._name ?? o?._localID ?? o?.id ?? "?");
@@ -1120,6 +1120,34 @@ export function setup(ctx) {
   };
 
   // ---------- goal -> popup ----------
+  // ---------- duplicates ----------
+  const entryKey = (e) => `${e.kind}|${e.itemId ?? e.monsterId ?? e.skillId ?? ""}|${e.actionId ?? ""}|${e.targetXp ?? ""}`;
+  const queuedKeys = () => new Set(Queue.items.filter((x) => x.status !== "done").map(entryKey));
+  const dupHtml = (entries) => {
+    if (!entries?.length) return "";
+    const keys = queuedKeys();
+    const dups = entries.filter((e) => keys.has(entryKey(e)));
+    if (!dups.length) return "";
+    const all = dups.length === entries.length;
+    return `<div class="mbd-step"><div class="mbd-chips">${chip(`<i class="fa fa-exclamation-triangle"></i>&nbsp;${all ? "This task is already in your queue" : `${dups.length} of ${entries.length} steps are already in your queue`}`, "warn")}</div>` +
+      `<div class="mbd-chips">${dups.map((e) => chip(esc(e.label))).join("")}</div>` +
+      `<div class="mbd-note">${all ? "Adding it again does nothing." : "Those steps will be skipped, the rest are added."}</div></div>`;
+  };
+  const tellPlayer = (msg) => {
+    try { notifyPlayer(game.township ?? game.attack, msg, "info"); } catch (e) { console.log("[Township Helper]", msg); }
+  };
+  const addUnique = (entries, top) => {
+    const seen = queuedKeys();
+    const fresh = [], skipped = [];
+    for (const e of entries) {
+      const k = entryKey(e);
+      if (seen.has(k)) skipped.push(e.label); else { seen.add(k); fresh.push(e); }
+    }
+    if (fresh.length) Queue.add(fresh, top);
+    if (skipped.length) tellPlayer(fresh.length ? `${skipped.length} step${skipped.length === 1 ? " was" : "s were"} already in the queue and skipped: ${skipped.join(", ")}` : "That task is already in your queue.");
+    return fresh.length;
+  };
+
   const killEntry = (goal, total) => {
     const m = goal.monster;
     const need = total ? goal.quantity : Math.max(0, goal.quantity - (goal._progress ?? 0));
@@ -1188,11 +1216,11 @@ export function setup(ctx) {
       ev.stopPropagation();
       try {
         const onQueue = info.queue && !info.blocked?.() ? (top) => {
-          Queue.add(info.queue(), top);
+          const added = addUnique(info.queue(), top);
           Panel.open();
-          if (Settings.autoStart() && Runner.state !== "running") Runner.start();
+          if (added && Settings.autoStart() && Runner.state !== "running") Runner.start();
         } : null;
-        fire(info.title, info.body, onQueue);
+        fire(info.title, () => dupHtml(info.queue?.()) + info.body(), onQueue);
       } catch (e) { console.warn("[Township Helper]", e); }
     });
     holder.appendChild(btn);
@@ -1256,10 +1284,10 @@ export function setup(ctx) {
       showItem: (id, qty = 1) => {
         const it = itemById(id);
         const miss = itemMissing(it, qty);
-        fire(`${qty} x ${esc(nm(it))}`, () => (itemMissing(it, qty).length ? missingHtml(itemMissing(it, qty)) : itemSection(it, qty)), miss.length || !buildRows(it, qty).length ? null : (top) => {
-          Queue.add(toEntries(buildRows(it, qty)), top);
+        fire(`${qty} x ${esc(nm(it))}`, () => (itemMissing(it, qty).length ? missingHtml(itemMissing(it, qty)) : dupHtml(toEntries(buildRows(it, qty))) + itemSection(it, qty)), miss.length || !buildRows(it, qty).length ? null : (top) => {
+          const added = addUnique(toEntries(buildRows(it, qty)), top);
           Panel.open();
-          if (Settings.autoStart() && Runner.state !== "running") Runner.start();
+          if (added && Settings.autoStart() && Runner.state !== "running") Runner.start();
         });
       },
       refresh,

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.0
+- The mod now checks the queue for duplicates. If steps from a task are already queued, the popup says so and lists them.
+- Adding a task skips steps that are already in the queue and tells you which ones were skipped. If the whole task is already queued, nothing is added.
+
 ## 0.9.3
 - When the mod can't find where an item comes from, the step now has a "Look it up on the Melvor wiki" link that searches https://wiki.melvoridle.com/ for the item. The same link is in the note on manual queue steps.
 
