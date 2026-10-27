@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.16.0";
+  const VERSION = "0.17.0";
   const LOG = (...a) => console.log("[Township Task Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => {
@@ -24,7 +24,7 @@ export function setup(ctx) {
   // ---------- settings ----------
   // As a Melvor mod, the switch lives in the mod settings menu (ctx.settings). It is also on the queue panel,
   // and falls back to localStorage if the settings API isn't there (userscript use).
-  const KEYS = { autoStart: ["mbd-th-autostart", false], autoSell: ["mbd-th-autosell", true] };
+  const KEYS = { autoStart: ["mbd-th-autostart", false], autoSell: ["mbd-th-autosell", true], buyCompost: ["mbd-th-buycompost", true] };
   const Settings = {
     api: null,
     get(name) {
@@ -39,6 +39,7 @@ export function setup(ctx) {
     autoStart() { return this.get("autoStart"); },
     setAutoStart(v) { this.set("autoStart", v); },
     autoSell() { return this.get("autoSell"); },
+    buyCompost() { return this.get("buyCompost"); },
   };
   if (typeof ctx !== "undefined" && ctx?.settings) {
     try {
@@ -55,6 +56,13 @@ export function setup(ctx) {
         name: "autoSell",
         label: "Automatically sell extras the queue makes",
         hint: "When a step makes more than the task needs (like arrowtips crafted in batches), the extra is sold. It never sells anything you already owned.",
+        default: true,
+      });
+      section.add({
+        type: "switch",
+        name: "buyCompost",
+        label: "Buy compost for Farming steps",
+        hint: "When on, a Farming step buys Compost from the shop if you run short, so crops always grow. It never spends more than a tenth of your gold on one purchase.",
         default: true,
       });
       Settings.api = section;
@@ -1077,6 +1085,56 @@ export function setup(ctx) {
   const cropChance = (f, r) => { try { return Math.min(1, Math.max(0.05, f.getPlotGrowthChance({ compostLevel: 0, plantedRecipe: r }) / 100)); } catch (e) { return 1; } };
   // XP one planting is worth on average (some crops give their XP when planted, the rest only when harvested)
   const cropXp = (f, r) => (r.baseExperience ?? 0) * (r.category?.scaleXPWithQuantity ? r.baseQuantity ?? 1 : 1) * (r.category?.giveXPOnPlant ? 1 : cropChance(f, r));
+  const COMPOST_ID = "melvorD:Compost", GLOOP_ID = "melvorD:Weird_Gloop";
+  const compostNeed = (item, level = 0) => Math.max(1, Math.ceil((100 - level) / (item?.compostValue || 20)));
+  const compostPrice = () => { try { return game.shop.purchases.getObjectByID(COMPOST_ID)?.costs?.currencies?.find((c) => c.currency?.id === "melvorD:GP")?.cost ?? 0; } catch (e) { return 0; } };
+  const compostBudget = () => (game.gp?.amount ?? 0) * 0.1; // one purchase never takes more than a tenth of your gold
+  // how many plots could be fully composted (100% growth) right now, from your bank plus what the shop would sell
+  const compostCover = () => {
+    try {
+      const cp = itemById(COMPOST_ID), gl = itemById(GLOOP_ID);
+      if (!cp) return 0;
+      let cover = (gl ? have(gl) ?? 0 : 0) + Math.floor((have(cp) ?? 0) / compostNeed(cp));
+      const price = compostPrice();
+      if (Settings.buyCompost() && price > 0) cover += Math.floor(compostBudget() / (price * compostNeed(cp)));
+      return cover;
+    } catch (e) { return 0; }
+  };
+  // growth chance across n plots, counting the ones compost can cover
+  const blendChance = (f, r, n) => { const base = cropChance(f, r); const k = Math.max(1, n), cov = Math.min(k, compostCover()); return (cov + (k - cov) * base) / k; };
+  const applyCompost = (f, plots) => {
+    const cp = itemById(COMPOST_ID), gl = itemById(GLOOP_ID);
+    if (!cp) return;
+    for (const p of plots) {
+      if (p.state !== PLOT.empty || p.compostLevel >= 100) continue;
+      try {
+        if (gl && (have(gl) ?? 0) > 0) { f.compostPlot(p, gl, 1); continue; }
+        const need = compostNeed(cp, p.compostLevel), own = have(cp) ?? 0, price = compostPrice();
+        if (own < need && Settings.buyCompost() && price > 0 && (need - own) * price <= compostBudget()) buyFromShop(COMPOST_ID, need - own);
+        if ((have(cp) ?? 0) >= need) f.compostPlot(p, cp, need);
+      } catch (e) { console.warn("[Township Task Helper] compost", e); }
+    }
+  };
+  // seeds ran short: add a fight that drops them (or the crop itself, if that's quicker) in front of this step
+  const fetchSeeds = (cur, f, r, plants) => {
+    const seed = r.seedCost.item, cost = seedCostOf(f, r);
+    const missing = Math.max(1, Math.ceil(plants * cost - (have(seed) ?? 0)));
+    cur.seedTrips = (cur.seedTrips ?? 0) + 1;
+    const pick = (item, qty) => farmFights(item, qty).filter((x) => x.open && x.safety.safe && isFinite(x.ms)).sort((a, b) => a.score - b.score)[0];
+    const viaSeed = pick(seed, missing);
+    let direct = null, remaining = 0;
+    if (cur.kind === "gather" && cur.itemId) { remaining = Math.max(1, cur.qty - Runner.gained(cur)); direct = pick(itemById(cur.itemId), remaining); }
+    let use = null, item = seed, qty = missing;
+    if (viaSeed) {
+      const plots = Math.max(1, openPlots(f, r).length), rounds = cur.kind === "gather" ? Math.ceil(remaining / (Math.max(1, r.baseQuantity ?? 1) * plots)) : 1;
+      use = viaSeed;
+      if (direct && direct.ms < viaSeed.ms + rounds * growMs(f, r)) { use = direct; item = itemById(cur.itemId); qty = remaining; }
+    } else if (direct) { use = direct; item = itemById(cur.itemId); qty = remaining; }
+    if (!use) return { block: `you need ${missing} more ${nm(seed)} and no monster you can fight safely drops them. Get some, then press Start` };
+    if (cur.seedTrips > 4) return { block: `fighting for ${nm(seed)} didn't give enough. Check your gear, then press Start` };
+    Queue.insertBefore(cur.id, [{ kind: "combat", itemId: item.id, qty, monsterId: use.m.id, untilItem: item.id, targetKills: Math.ceil(qty / use.perKill), label: `Fight ${nm(use.m)} for ${nm(item)}` }]);
+    return { again: true };
+  };
   const plotLeft = (f, p) => { try { return f.getPlotGrowthTime(p); } catch (e) { return 0; } };
   const seedIds = () => { const f = farmSkill(); return new Set(list(f?.actions).map((r) => r.seedCost?.item?.id).filter(Boolean)); };
   const isSeedItem = (item) => !!item && seedIds().has(item.id);
@@ -1107,7 +1165,11 @@ export function setup(ctx) {
       const busy = r && openPlots(f, r).some((p) => p.plantedRecipe === r && p.state !== PLOT.empty);
       if (!busy) {
         const b = bestCrop(f);
-        if (!b) return { block: "no seeds to plant. Get some seeds, then press Start" };
+        if (!b) {
+          const w = bestCrop(f, false);
+          if (!w) return { block: "no crop you can plant yet. Unlock a plot or level up Farming, then press Start" };
+          return fetchSeeds(cur, f, w.r, w.plots);
+        }
         r = b.r; cur.cropId = r.id;
       }
     } else r = actionById(f, cur.actionId);
@@ -1122,18 +1184,20 @@ export function setup(ctx) {
     const done = xpMode ? (f.xp ?? 0) >= cur.targetXp : Runner.gained(cur) >= cur.qty;
     if (done) return { done: true };
     const growing = plots.filter((p) => mine(p) && p.state === PLOT.growing);
-    const need = xpMode ? Math.ceil((cur.targetXp - (f.xp ?? 0)) / Math.max(1, cropXp(f, r))) : Math.ceil((cur.qty - Runner.gained(cur)) / (per * cropChance(f, r)));
+    const need = xpMode ? Math.ceil((cur.targetXp - (f.xp ?? 0)) / Math.max(1, cropXp(f, r))) : Math.ceil((cur.qty - Runner.gained(cur)) / (per * blendChance(f, r, plots.length)));
     const toPlant = need - Math.ceil(growing.length);
     if (toPlant > 0) {
       const empty = plots.filter((p) => p.state === PLOT.empty);
       const cost = seedCostOf(f, r), seeds = have(r.seedCost.item) ?? 0;
       const n = Math.min(toPlant, empty.length, Math.floor(seeds / cost));
+      applyCompost(f, empty.slice(0, n));
       const timers = new Map(); // the game starts one growth timer per planting time, the same way its own Plant All button does
       for (let i = 0; i < n; i++) {
         const t = f.plantPlot(empty[i], r);
         if (t > 0 && empty[i].state === PLOT.growing) { if (!timers.has(t)) timers.set(t, []); timers.get(t).push(empty[i]); }
       }
       timers.forEach((ps, t) => f.createGrowthTimer(ps, t));
+      if (n === 0 && !growing.length && empty.length && seeds < cost) return fetchSeeds(cur, f, r, Math.min(need, empty.length));
       if (n === 0 && !growing.length) {
         return { block: empty.length ? `needs ${cost} ${nm(r.seedCost.item)} to plant ${nm(r)} and you have ${seeds}. Get some, then press Start` : `all your ${nm(r.category)} plots are busy with other crops. Harvest or clear them, then press Start` };
       }
@@ -1155,7 +1219,7 @@ export function setup(ctx) {
     if (!r) return null;
     const plots = Math.max(1, openPlots(f, r).length);
     const units = Math.max(0, e.qty - Runner.gained(e));
-    return Math.ceil(units / (Math.max(1, r.baseQuantity ?? 1) * cropChance(f, r) * plots)) * growMs(f, r);
+    return Math.ceil(units / (Math.max(1, r.baseQuantity ?? 1) * blendChance(f, r, plots) * plots)) * growMs(f, r);
   };
 
   // ---------- time estimates (base speeds; the active entry switches to its measured speed after a few seconds) ----------
@@ -1541,12 +1605,19 @@ export function setup(ctx) {
       seen.delete(item.id);
       return { ms, xp };
     }
-    if (isSeedItem(item)) return (have(item) ?? 0) >= n ? { ms: 0, xp: 0 } : NO; // seeds only come from drops and the shop, so count what you own
+    if (isSeedItem(item)) { // seeds only come from monster drops: what you own is free, the rest is a fight
+      const hv = have(item) ?? 0;
+      if (hv >= n) return { ms: 0, xp: 0 };
+      const o = farmFights(item, n - hv).filter((x) => x.open && x.safety.safe && isFinite(x.ms)).sort((x, y) => x.score - y.score)[0];
+      return o ? { ms: o.ms, xp: 0 } : NO;
+    }
     const g = idx.gatherers.get(item.id)?.[0];
     if (g?.skill.id === FARMING_ID) { // a crop: you need the seeds already, and the wait is one growth time per round of your plots
       const f = g.skill, plots = openPlots(f, g.a).length, cost = seedCostOf(f, g.a);
-      if (!plots || (g.a.level ?? 1) > levelIn(f, lv) || (have(g.a.seedCost.item) ?? 0) < cost) return NO;
-      return { ms: Math.ceil(n / (Math.max(1, g.a.baseQuantity ?? 1) * cropChance(f, g.a) * plots)) * growMs(f, g.a), xp: 0 };
+      if (!plots || (g.a.level ?? 1) > levelIn(f, lv)) return NO;
+      const per = Math.max(1, g.a.baseQuantity ?? 1) * blendChance(f, g.a, plots), sd = acquire(g.a.seedCost.item, Math.min(plots, Math.ceil(n / per)) * cost, lv, skillId, seen, depth + 1);
+      if (!isFinite(sd.ms)) return NO;
+      return { ms: sd.ms + Math.ceil(n / (Math.max(1, g.a.baseQuantity ?? 1) * blendChance(f, g.a, plots) * plots)) * growMs(f, g.a), xp: 0 };
     }
     if (!g || !isPlannable(g.skill) || (g.a.level ?? 1) > levelIn(g.skill, lv)) return NO;
     const acts = n / Math.max(1, g.a.baseQuantity ?? 1);
