@@ -1410,7 +1410,7 @@ export function setup(ctx) {
       for (let guard = 0; guard < 100; guard++) {
         if (this.farmWatch) { // we stepped away from a Farming step while its crops grow: go back when something is ready
           const w = Queue.items.find((e) => e.id === this.farmWatch && e.status !== "done");
-          if (!w || farmReady(w)) { this.farmWatch = null; if (this.farmFocus) { this.focusId = null; this.farmFocus = false; } }
+          if (!w || farmReady(w)) { this.farmWatch = null; this.message = ""; if (this.farmFocus) { this.focusId = null; this.farmFocus = false; } }
         }
         const cur = this.current();
         if (!cur) { this.leave(); this.setState("idle", "Queue finished"); return; }
