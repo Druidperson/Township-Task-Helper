@@ -1221,6 +1221,22 @@
     game.stopActiveAction();
   }), { live: true });
 
+  const HD = "Holy Dust";
+  test(HD, "Holy Dust breaks down into runes and a Blessed Offering step", () => sandbox(async () => {
+    const it = itm("melvorF:Holy_Dust");
+    const es = D().toEntries(D().buildRows(it, 30));
+    const last = es[es.length - 1];
+    eq(last.skillId, "melvorD:Magic"); eq(last.itemId, "melvorF:Holy_Dust"); eq(last.kind, "craft");
+    const nature = es.find((e) => e.itemId === "melvorF:Nature_Rune"), earth = es.find((e) => e.itemId === "melvorD:Earth_Rune");
+    ok(nature && earth, "should farm the runes");
+    eq(nature.qty, 2 * earth.qty);
+  }));
+  test(HD, "Blessed Offering is the only spell turned into a recipe", () => sandbox(async () => {
+    D().toEntries(D().buildRows(itm("melvorF:Holy_Dust"), 3));
+    const spells = game.skills.getObjectByID("melvorD:Magic").actions.allObjects.filter((a) => "itemCosts" in a).map((a) => a.id);
+    eq(spells.join(), "melvorF:BlessedOffering");
+  }));
+
   const run = async (opts = {}) => {
     const { live = true, group = null, only = null } = opts;
     const results = [];
