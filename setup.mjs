@@ -1073,7 +1073,10 @@ export function setup(ctx) {
   const openPlots = (f, r) => plotsFor(f, r).filter((p) => p.state !== PLOT.locked);
   const growMs = (f, r) => { try { const v = f.modifyInterval(r.baseInterval, r); return v > 0 ? v : r.baseInterval; } catch (e) { return r.baseInterval; } };
   const seedCostOf = (f, r) => { try { return f.getRecipeSeedCost(r); } catch (e) { return r.seedCost?.quantity ?? 1; } };
-  const cropXp = (f, r) => (r.baseExperience ?? 0) * (r.category?.scaleXPWithQuantity ? r.baseQuantity ?? 1 : 1);
+  // without compost a crop only grows about half the time, and a dead crop gives nothing and loses its seeds
+  const cropChance = (f, r) => { try { return Math.min(1, Math.max(0.05, f.getPlotGrowthChance({ compostLevel: 0, plantedRecipe: r }) / 100)); } catch (e) { return 1; } };
+  // XP one planting is worth on average (some crops give their XP when planted, the rest only when harvested)
+  const cropXp = (f, r) => (r.baseExperience ?? 0) * (r.category?.scaleXPWithQuantity ? r.baseQuantity ?? 1 : 1) * (r.category?.giveXPOnPlant ? 1 : cropChance(f, r));
   const plotLeft = (f, p) => { try { return f.getPlotGrowthTime(p); } catch (e) { return 0; } };
   const seedIds = () => { const f = farmSkill(); return new Set(list(f?.actions).map((r) => r.seedCost?.item?.id).filter(Boolean)); };
   const isSeedItem = (item) => !!item && seedIds().has(item.id);
@@ -1092,7 +1095,8 @@ export function setup(ctx) {
     }
     return best;
   };
-  // one pass for a Farming step: harvest what's ready, plant what's needed, say whether to wait
+  // one pass for a Farming step: harvest what's ready, plant what's needed, say whether to wait.
+  // plants extra to make up for crops that die; growing ones count at their chance too
   const farmStep = (cur) => {
     const f = farmSkill();
     if (!f) return { block: "Farming wasn't found in your game version" };
@@ -1118,8 +1122,8 @@ export function setup(ctx) {
     const done = xpMode ? (f.xp ?? 0) >= cur.targetXp : Runner.gained(cur) >= cur.qty;
     if (done) return { done: true };
     const growing = plots.filter((p) => mine(p) && p.state === PLOT.growing);
-    const need = xpMode ? Math.ceil((cur.targetXp - (f.xp ?? 0)) / Math.max(1, cropXp(f, r))) : Math.ceil((cur.qty - Runner.gained(cur)) / per);
-    const toPlant = need - growing.length;
+    const need = xpMode ? Math.ceil((cur.targetXp - (f.xp ?? 0)) / Math.max(1, cropXp(f, r))) : Math.ceil((cur.qty - Runner.gained(cur)) / (per * cropChance(f, r)));
+    const toPlant = need - Math.ceil(growing.length);
     if (toPlant > 0) {
       const empty = plots.filter((p) => p.state === PLOT.empty);
       const cost = seedCostOf(f, r), seeds = have(r.seedCost.item) ?? 0;
@@ -1151,7 +1155,7 @@ export function setup(ctx) {
     if (!r) return null;
     const plots = Math.max(1, openPlots(f, r).length);
     const units = Math.max(0, e.qty - Runner.gained(e));
-    return Math.ceil(units / (Math.max(1, r.baseQuantity ?? 1) * plots)) * growMs(f, r);
+    return Math.ceil(units / (Math.max(1, r.baseQuantity ?? 1) * cropChance(f, r) * plots)) * growMs(f, r);
   };
 
   // ---------- time estimates (base speeds; the active entry switches to its measured speed after a few seconds) ----------
@@ -1542,7 +1546,7 @@ export function setup(ctx) {
     if (g?.skill.id === FARMING_ID) { // a crop: you need the seeds already, and the wait is one growth time per round of your plots
       const f = g.skill, plots = openPlots(f, g.a).length, cost = seedCostOf(f, g.a);
       if (!plots || (g.a.level ?? 1) > levelIn(f, lv) || (have(g.a.seedCost.item) ?? 0) < cost) return NO;
-      return { ms: Math.ceil(n / (Math.max(1, g.a.baseQuantity ?? 1) * plots)) * growMs(f, g.a), xp: 0 };
+      return { ms: Math.ceil(n / (Math.max(1, g.a.baseQuantity ?? 1) * cropChance(f, g.a) * plots)) * growMs(f, g.a), xp: 0 };
     }
     if (!g || !isPlannable(g.skill) || (g.a.level ?? 1) > levelIn(g.skill, lv)) return NO;
     const acts = n / Math.max(1, g.a.baseQuantity ?? 1);
