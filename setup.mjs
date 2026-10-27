@@ -1075,6 +1075,8 @@ export function setup(ctx) {
   const seedCostOf = (f, r) => { try { return f.getRecipeSeedCost(r); } catch (e) { return r.seedCost?.quantity ?? 1; } };
   const cropXp = (f, r) => (r.baseExperience ?? 0) * (r.category?.scaleXPWithQuantity ? r.baseQuantity ?? 1 : 1);
   const plotLeft = (f, p) => { try { return f.getPlotGrowthTime(p); } catch (e) { return 0; } };
+  const seedIds = () => { const f = farmSkill(); return new Set(list(f?.actions).map((r) => r.seedCost?.item?.id).filter(Boolean)); };
+  const isSeedItem = (item) => !!item && seedIds().has(item.id);
   const farmCrops = (f) => list(f.actions).filter((r) => (!r.realm || r.realm.id === MELVOR_REALM) && r.seedCost?.item && (r.level ?? 1) <= f.level);
   // the crop that gives the most XP per hour with the plots and seeds you have (ownedOnly: count only what the bank can plant now)
   const bestCrop = (f, ownedOnly = true) => {
@@ -1530,7 +1532,13 @@ export function setup(ctx) {
       seen.delete(item.id);
       return { ms, xp };
     }
+    if (isSeedItem(item)) return (have(item) ?? 0) >= n ? { ms: 0, xp: 0 } : NO; // seeds only come from drops and the shop, so count what you own
     const g = idx.gatherers.get(item.id)?.[0];
+    if (g?.skill.id === FARMING_ID) { // a crop: you need the seeds already, and the wait is one growth time per round of your plots
+      const f = g.skill, plots = openPlots(f, g.a).length, cost = seedCostOf(f, g.a);
+      if (!plots || (g.a.level ?? 1) > levelIn(f, lv) || (have(g.a.seedCost.item) ?? 0) < cost) return NO;
+      return { ms: Math.ceil(n / (Math.max(1, g.a.baseQuantity ?? 1) * plots)) * growMs(f, g.a), xp: 0 };
+    }
     if (!g || !isPlannable(g.skill) || (g.a.level ?? 1) > levelIn(g.skill, lv)) return NO;
     const acts = n / Math.max(1, g.a.baseQuantity ?? 1);
     return { ms: acts * intervalMs(g.skill, g.a), xp: g.skill.id === skillId ? acts * (g.a.baseExperience ?? 0) : 0 };
