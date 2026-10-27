@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.15.0
+- Changed: the Train a skill button and window moved out into their own mod, Skill Trainer, which works without Township tasks. Task Helper still uses the same planner for XP tasks. The Prefer mastery XP setting went with it. If you want both mods, they keep separate queues, so run one queue at a time.
+
 ## 0.14.1
 - New: gems are now farmed by skilling. Topaz, Sapphire, Ruby, Emerald and Diamond are found while mining, and fishing areas that give special finds can drop them too, so the picker lists both and defaults to the best XP/hour.
 - New: Bobby's Pocket and Chapeau Noir are farmed with Thieving. Any target can drop them with a small chance, so the picker lists every target you can use and defaults to the best XP/hour.

@@ -150,10 +150,6 @@
     ok(/^\d+\.\d+\.\d+$/.test(TH().version), "version " + TH().version);
     for (const k of ["queue", "panel", "runner", "settings", "showItem", "refresh", "_dev"]) ok(TH()[k], "townshipHelper." + k);
   });
-  test(I, "minibar has the queue and train buttons", () => {
-    ok(document.getElementById("mbd-queue-btn"), "queue button");
-    ok(document.getElementById("mbd-train-btn"), "train button");
-  });
   test(I, "task goal elements get a play button", async () => {
     const goals = [];
     for (const t of list(game.township.tasks.tasks)) for (const g of t.goals.allGoals) if (D().describeGoal(g)) { goals.push(g); if (goals.length >= 5) break; }
@@ -165,6 +161,10 @@
     try {
       for (const g of goals) { el.setGoal(g); ok((el.container ?? el).querySelector(".mbd-th-btn"), "no button for " + g.constructor.name); }
     } finally { el.remove(); }
+  });
+  test(I, "minibar has the queue button and no train button", () => {
+    ok(document.getElementById("mbd-queue-btn"), "queue button");
+    ok(!document.getElementById("mbd-train-btn"), "the train button moved to Skill Trainer");
   });
   test(I, "panel opens and closes", () => {
     TH().panel.open();
@@ -566,9 +566,10 @@
   test(L, "auto-start begins the queue when something is added", () => sandbox(async () => {
     liveOk();
     TH().settings.setAutoStart(true);
-    D().TS.skillId = "melvorD:Woodcutting";
-    D().openTrain();
-    document.querySelector(".swal2-deny").click();
+    const logs = item("melvorD:Normal_Logs");
+    TH().showItem(logs.id, (game.bank.getQty(logs) ?? 0) + 5);
+    ok(await popupReady(), "popup never finished opening");
+    [...document.querySelectorAll(".swal2-actions button")].find((b) => /Add to queue/.test(b.textContent)).click();
     ok(await waitFor(() => TH().runner.state === "running", 4000), "didn't start: " + TH().runner.state);
   }), live);
 
@@ -671,73 +672,6 @@
     if (document.getElementById("mbd-tr-skill").value !== "melvorD:" + skillName) setv("mbd-tr-skill", "melvorD:" + skillName);
     if (goal !== "level") setv("mbd-tr-goal", goal);
   };
-  test(U, "opens from the minibar button with a skill list and a live preview", () => sandbox(async () => {
-    D().TS.goal = "level"; // the popup remembers the last goal you used
-    document.getElementById("mbd-train-btn").click();
-    ok(await popupReady(), "popup never finished opening");
-    const sel = document.getElementById("mbd-tr-skill");
-    ok(sel, "popup");
-    ok(sel.options.length >= TRAINABLE.length, "skills listed");
-    if (sel.value !== "melvorD:Woodcutting") setv("mbd-tr-skill", "melvorD:Woodcutting"); // the popup starts on the skill page you are on
-    has(document.getElementById("mbd-tr-prev").textContent, "XP/hour");
-  }));
-  test(U, "level goal queues one train step", () => sandbox(async () => {
-    await open("Woodcutting");
-    const sk = skill("Woodcutting");
-    setv("mbd-tr-level", String(sk.level + 2), "input");
-    document.querySelector(".swal2-deny").click();
-    await sleep(100);
-    eq(TH().queue.items.length, 1);
-    const e = TH().queue.items[0];
-    eq(e.kind, "train"); eq(e.targetLevel, sk.level + 2); eq(e.targetXp, exp.level_to_xp(sk.level + 2));
-  }));
-  test(U, "'sell the items it makes' is saved on the step", () => sandbox(async () => {
-    await open("Woodcutting");
-    setv("mbd-tr-sell", true);
-    document.querySelector(".swal2-deny").click();
-    await sleep(100);
-    eq(TH().queue.items[0].sellMade, true);
-  }));
-  test(U, "a level at or below yours adds nothing and says why", () => sandbox(async () => {
-    captureNotices();
-    await open("Woodcutting");
-    setv("mbd-tr-level", String(skill("Woodcutting").level), "input");
-    document.querySelector(".swal2-deny").click();
-    await sleep(100);
-    eq(TH().queue.items.length, 0);
-    ok(notes.length > 0, "no notice");
-  }));
-  test(U, "make mode queues the full chain and the amount, even if some is in the bank", () => sandbox(async () => {
-    bankStub((id) => (id === "melvorD:Bronze_Bar" ? 100 : 0));
-    await open("Smithing", "make");
-    setv("mbd-tr-item", "melvorD:Bronze_Bar");
-    setv("mbd-tr-qty", "20", "input");
-    has(document.getElementById("mbd-tr-prev").textContent, "Make 20 Bronze Bar");
-    document.querySelector(".swal2-deny").click();
-    await sleep(100);
-    const bar = TH().queue.items.find((e) => e.kind === "craft");
-    ok(bar, "no craft step");
-    eq(bar.qty, 20, "bars to make");
-  }));
-  test(U, "make mode refuses recipes above your level", () => sandbox(async () => {
-    const sm = skill("Smithing");
-    const hard = list(sm.actions).filter((a) => a.product && a.level > sm.level)[0];
-    if (!hard) skip("no locked Smithing recipe");
-    captureNotices();
-    await open("Smithing", "make");
-    setv("mbd-tr-item", hard.id);
-    has(document.getElementById("mbd-tr-prev").textContent, "Warning");
-    document.querySelector(".swal2-deny").click();
-    await sleep(100);
-    eq(TH().queue.items.length, 0);
-  }));
-  test(U, "changing the skill rebuilds the form", () => sandbox(async () => {
-    await open("Woodcutting");
-    setv("mbd-tr-skill", "melvorD:Mining");
-    await sleep(50);
-    eq(D().TS.skillId, "melvorD:Mining");
-    has(document.getElementById("mbd-tr-method").textContent, "Best available");
-  }));
   test(U, "queued level goals expand into steps when run", () => sandbox(async () => {
     liveOk();
     const sk = skill("Woodcutting");
@@ -1162,19 +1096,6 @@
     ok(on.every((c) => c.score >= c.rate), "mastery XP can only add to the score");
     ok(on.every((c, i) => i === 0 || on[i - 1].score >= c.score), "sorted by score");
   }));
-  test(LA, "the train popup has the mastery switch and it changes the setting", () => sandbox(async () => {
-    D().TS.goal = "level";
-    D().openTrain();
-    ok(await popupReady(), "popup never finished opening");
-    if (document.getElementById("mbd-tr-skill").value !== "melvorD:Woodcutting") setv("mbd-tr-skill", "melvorD:Woodcutting");
-    const cb = document.getElementById("mbd-tr-mastery");
-    ok(cb, "mastery switch missing");
-    eq(cb.checked, false);
-    cb.checked = true;
-    cb.dispatchEvent(new Event("change", { bubbles: true }));
-    eq(TH().settings.preferMastery(), true);
-  }));
-
   // =====================================================================================
   const SD = "Skill drops";
   const itm = (id) => game.items.getObjectByID(id);

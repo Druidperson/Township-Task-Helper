@@ -38,7 +38,7 @@ The result is a summary line, a table of anything that failed or was skipped, an
 | Runner | Idle on an empty queue, manual steps, blocked steps, Stop, monsters outside normal areas. |
 | Live actions | Gathering to completion, XP goals, pause and resume, "do this first", starting a fight, auto-start. These start real actions for a few seconds. |
 | XP planner | Methods sorted best first and open at your level. |
-| Train a skill | Plans are contiguous and reach the target, the chosen method is never much slower than the best one, batches become real steps, the bank is used first, estimates, and the whole popup. |
+| Train a skill | The planner behind XP tasks: plans are contiguous and reach the target, the chosen method is never much slower than the best one, batches become real steps, the bank is used first, estimates. |
 
 ## Safety
 
