@@ -1443,7 +1443,7 @@ export function setup(ctx) {
           if (fr.done) { this.finish(cur); continue; }
           if (fr.block) { this.block(cur, fr.block); return; }
           if (fr.again) continue;
-          if (fr.wait > 60000 && Settings.farmMulti() && !this.focusId) {
+          if (fr.wait > 20000 && Settings.farmMulti() && !this.focusId) {
             const at = Queue.items.indexOf(cur);
             const next = Queue.items.find((e, i) => i > at && e.status !== "done" && e.status !== "blocked" && !isFarmEntry(e) && (e.kind === "combat" || (e.kind === "gather" && e.skillId !== ASTRO_ID && (!cur.itemId || e.itemId !== cur.itemId))));
             if (next) { this.focusId = next.id; this.farmFocus = true; this.farmWatch = cur.id; this.message = `${fr.note}. Working on "${next.label}" meanwhile`; Panel.render(); continue; }
