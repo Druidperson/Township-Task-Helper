@@ -105,12 +105,29 @@ export function setup(ctx) {
     } catch (e) { /* ignore */ }
     return out;
   };
+  // Alt. Magic spells that turn runes into an item (Blessed Offering makes Holy Dust) look like a
+  // recipe to the rest of the helper once they get recipe-style fields.
+  const MAGIC_ID = "melvorD:Magic";
+  const decorateSpells = (skill) => {
+    for (const sp of list(skill.actions)) {
+      try {
+        if (!sp.produces || !(sp.runesRequired?.length) || sp.specialCost?.type !== -5 || "itemCosts" in sp) continue;
+        Object.defineProperties(sp, {
+          itemCosts: { get: () => sp.runesRequired.map((r) => ({ item: r.item, quantity: r.quantity })), configurable: true },
+          product: { get: () => sp.produces, configurable: true },
+          baseQuantity: { get: () => sp.productionRatio ?? 1, configurable: true },
+          baseInterval: { get: () => skill.baseInterval ?? 2000, configurable: true },
+        });
+      } catch (e) { /* ignore */ }
+    }
+  };
   // ---------- recipe index (built on first use) ----------
   let idx = null;
   const buildIndex = () => {
     if (idx) return idx;
     idx = { crafters: new Map(), gatherers: new Map(), randoms: new Map(), droppers: new Map(), shop: new Map() };
     for (const skill of list(game.skills)) {
+      if (skill.id === MAGIC_ID) decorateSpells(skill);
       for (const a of list(skill.actions)) {
         const isCraft = Array.isArray(a.itemCosts) && (a.itemCosts.length > 0 || (a.alternativeCosts?.length ?? 0) > 0);
         if (a.product) push(isCraft ? idx.crafters : idx.gatherers, a.product.id, { skill, a });
@@ -858,6 +875,10 @@ export function setup(ctx) {
           skill.onAreaStartButtonClick(area);
           break;
         }
+        case "melvorD:Magic":
+          skill.selectSpellOnClick(a);
+          if (!skill.isActive) skill.castButtonOnClick();
+          break;
         case "melvorD:Thieving":
           if (!a.area) return { ok: false, reason: "no thieving area found for this target" };
           skill.startThieving(a.area, a);
