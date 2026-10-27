@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.18.0
+- New: while a Farming step waits for its crops, the queue now works on the next gathering or fighting step and comes back when a crop is ready. Crafting and training steps are never started early, since they might need the crop. You can turn this off in the mod settings with "Work on other steps while crops grow".
+- The tests are back, rebuilt for everything the mod does now, including Farming, compost and seed fights.
+
 ## 0.17.1
 - The download is about a third smaller. Nothing changed in how the mod works.
 
