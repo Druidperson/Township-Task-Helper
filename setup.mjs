@@ -2102,7 +2102,7 @@ export function setup(ctx) {
         itemMissing, areaMissing, missingHtml, reqText, buildRows, toEntries, itemSection, sourceHtml, buyHtml, buyFromShop, wikiUrl,
         monsterSection, foodHtml, setsHtml, describeGoal, entryKey, addUnique, dupHtml, tellPlayer, xpCandidates, xpSection, estimateMs,
         startAction, startEntry, killEntry, areaFor, obtainable, fire,
-        succ, acquire, stepFor, farmStep, bestCrop, isFarmEntry, openPlots, farmEstimate, xpMaterialBatch, restockCraft, levelPlan, methodCands, nextBatch, fmtDur, Astro, Farm, farmSkills, farmFights, farmPlan, fightSafety, monsterMaxHit, dropPerKill, isFarmItem, farmHtml, astroCons, astroOptions, bestCon, astroHtml, isAstroItem,
+        succ, acquire, stepFor, farmStep, blendChance, compostCover, compostNeed, applyCompost, farmReady, cropChance, bestCrop, isFarmEntry, openPlots, farmEstimate, xpMaterialBatch, restockCraft, levelPlan, methodCands, nextBatch, fmtDur, Astro, Farm, farmSkills, farmFights, farmPlan, fightSafety, monsterMaxHit, dropPerKill, isFarmItem, farmHtml, astroCons, astroOptions, bestCon, astroHtml, isAstroItem,
       },
     };
     LOG("installed", VERSION);
