@@ -449,12 +449,11 @@
       { kind: "manual", itemId: "melvorD:Feathers", qty: 5, label: "Manual row", note: "n" },
       { kind: "xp", skillId: sk.id, targetXp: sk.xp + 100, qty: 1, label: "XP row" },
       { kind: "combat", monsterId: aMonster().id, targetKills: 2, rel: true, qty: 2, label: "Combat row" },
-      { kind: "train", skillId: sk.id, targetLevel: sk.level + 2, targetXp: exp.level_to_xp(sk.level + 2), qty: 1, label: "Train row" },
+      { kind: "gather", skillId: "melvorD:Farming", actionId: "melvorD:Potatoes", itemId: "melvorD:Potatoes", qty: 3, label: "Farm row" },
     ]);
     TH().panel.open();
     const t = TH().panel.el.innerText;
-    for (const l of ["Gather row", "Craft row", "Manual row", "XP row", "Combat row", "Train row"]) has(t, l);
-    has(t, `Level ${sk.level} / ${sk.level + 2}`, "train progress");
+    for (const l of ["Gather row", "Craft row", "Manual row", "XP row", "Combat row", "Farm row"]) has(t, l);
     has(t, "6 actions left");
   }));
   test(P, "an empty queue says so and disables Start", () => sandbox(() => {
