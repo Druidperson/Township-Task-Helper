@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.16.0
+- New: Farming. Queue steps can now plant and harvest crops, so tasks that need Potatoes, herbs and other crops no longer ask you to grow them yourself. It uses the seeds you already own and the plots you've unlocked, and it never buys anything.
+- New: Farming works as an XP goal too. The queue picks the best crop you can plant and keeps replanting until you reach the target.
+- New: Herblore tasks can now be planned, because the herbs they need can come from Farming.
+- Crops can die without compost, so the queue plants a few extra and the time estimate includes that.
+- The queue waits at a Farming step while the crops grow.
+
 ## 0.15.2
 - Fixed: a Herblore XP task now says why it can't run. Herblore needs herbs and seeds from Farming, which the queue can't run yet, so it asks you to get the herbs yourself instead of showing a vague message.
 
