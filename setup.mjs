@@ -1134,7 +1134,7 @@ export function setup(ctx) {
       const any = all(seed, missing).sort((a, b) => a.score - b.score)[0];
       return { block: any ? `you need ${missing} more ${nm(seed)}. ${cap(nm(any.m))} drops them, but the fight isn't safe: ${any.safety.why}` : `you need ${missing} more ${nm(seed)} and no monster you can reach drops them` };
     }
-    if (cur.seedTrips > 4) return { block: `fighting for ${nm(seed)} didn't give enough. Check your gear, then press Start` };
+    if (cur.seedTrips > 4) return { block: `fighting for ${nm(seed)} didn't give enough. Check your gear` };
     Queue.insertBefore(cur.id, [{ kind: "combat", itemId: item.id, qty, monsterId: use.m.id, untilItem: item.id, targetKills: Math.ceil(qty / use.perKill), label: `Fight ${nm(use.m)} for ${nm(item)}` }]);
     return { again: true };
   };
@@ -1170,7 +1170,7 @@ export function setup(ctx) {
         const b = bestCrop(f);
         if (!b) {
           const w = bestCrop(f, false);
-          if (!w) return { block: "no crop you can plant yet. Unlock a plot or level up Farming, then press Start" };
+          if (!w) return { block: "no crop you can plant yet. Unlock a plot or level up Farming" };
           return fetchSeeds(cur, f, w.r, w.plots);
         }
         r = b.r; cur.cropId = r.id;
@@ -1202,7 +1202,7 @@ export function setup(ctx) {
       timers.forEach((ps, t) => f.createGrowthTimer(ps, t));
       if (n === 0 && !growing.length && empty.length && seeds < cost) return fetchSeeds(cur, f, r, Math.min(need, empty.length));
       if (n === 0 && !growing.length) {
-        return { block: empty.length ? `needs ${cost} ${nm(r.seedCost.item)} to plant ${nm(r)} and you have ${seeds}.` : `all your ${nm(r.category)} plots are busy with other crops. Harvest or clear them, then press Start` };
+        return { block: empty.length ? `needs ${cost} ${nm(r.seedCost.item)} to plant ${nm(r)} and you have ${seeds}.` : `all your ${nm(r.category)} plots are busy with other crops. Harvest or clear them` };
       }
     }
     const now = plots.filter((p) => mine(p) && p.state === PLOT.growing);
