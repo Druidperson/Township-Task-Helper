@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.1
+- Cleanup after Train a skill moved out. The look-ahead across skills, the mastery weighting and the level-goal step type are gone from Task Helper. XP tasks work as before. Level goals saved in an older queue turn into plain XP steps and keep working.
+- The test suite is removed for now. A new one will replace it.
+
 ## 0.15.0
 - Changed: the Train a skill button and window moved out into their own mod, Skill Trainer, which works without Township tasks. Task Helper still uses the same planner for XP tasks. The Prefer mastery XP setting went with it. If you want both mods, they keep separate queues, so run one queue at a time.
 

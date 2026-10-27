@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.15.0";
+  const VERSION = "0.15.1";
   const LOG = (...a) => console.log("[Township Task Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => {
@@ -24,7 +24,7 @@ export function setup(ctx) {
   // ---------- settings ----------
   // As a Melvor mod, the switch lives in the mod settings menu (ctx.settings). It is also on the queue panel,
   // and falls back to localStorage if the settings API isn't there (userscript use).
-  const KEYS = { autoStart: ["mbd-th-autostart", false], autoSell: ["mbd-th-autosell", true], preferMastery: ["mbd-th-mastery", false] };
+  const KEYS = { autoStart: ["mbd-th-autostart", false], autoSell: ["mbd-th-autosell", true] };
   const Settings = {
     api: null,
     get(name) {
@@ -39,7 +39,6 @@ export function setup(ctx) {
     autoStart() { return this.get("autoStart"); },
     setAutoStart(v) { this.set("autoStart", v); },
     autoSell() { return this.get("autoSell"); },
-    preferMastery() { return this.get("preferMastery"); },
   };
   if (typeof ctx !== "undefined" && ctx?.settings) {
     try {
@@ -791,6 +790,7 @@ export function setup(ctx) {
       try { const raw = localStorage.getItem(this.key()); this.items = raw ? JSON.parse(raw) : []; } catch (e) { this.items = []; }
       // the runner never survives a reload, so nothing is "in progress" any more (progress counts are kept)
       for (const e of this.items) {
+        if (e.kind === "train") { e.kind = "xp"; delete e.targetLevel; delete e.now; delete e.afterLevel; } // old level goals from before Train a skill moved to its own mod
         if (e.status === "active" || e.status === "waiting" || e.status === "blocked") e.status = "pending";
         delete e.reason; delete e.ack; delete e.t0; delete e.g0; delete e.started;
       }
@@ -1063,10 +1063,9 @@ export function setup(ctx) {
     const opt = options(a)[e.altIndex ?? 0];
     return ms / (Math.max(1, (a.baseQuantity ?? 1) * (opt?.mult ?? 1)) * succ(skill, a));
   };
-  const remainingUnits = (e) => (e.kind === "combat" ? Math.max(0, e.targetKills - Runner.gained(e)) : (e.kind === "xp" || e.kind === "train") ? Math.max(0, e.targetXp - (skillById(e.skillId)?.xp ?? 0)) : Math.max(0, e.qty - Runner.gained(e)));
+  const remainingUnits = (e) => (e.kind === "combat" ? Math.max(0, e.targetKills - Runner.gained(e)) : e.kind === "xp" ? Math.max(0, e.targetXp - (skillById(e.skillId)?.xp ?? 0)) : Math.max(0, e.qty - Runner.gained(e)));
   const estimateMs = (e) => {
     if (e.kind === "manual" || e.status === "done") return 0;
-    if (e.kind === "train") return trainEstimate(e);
     const units = remainingUnits(e);
     if (units <= 0) return 0;
     let per = msPerUnit(e);
@@ -1122,7 +1121,7 @@ export function setup(ctx) {
     },
     gained(e) {
       if (e.kind === "combat") { const c = killCount(e); return e.rel ? Math.max(0, c - (e.k0 ?? c)) : c; }
-      if (e.kind === "xp" || e.kind === "train") return Math.floor(skillById(e.skillId)?.xp ?? 0);
+      if (e.kind === "xp") return Math.floor(skillById(e.skillId)?.xp ?? 0);
       if (e.startQty === undefined) return 0;
       return Math.max(0, (have(itemById(e.itemId)) ?? 0) - e.startQty);
     },
@@ -1213,22 +1212,6 @@ export function setup(ctx) {
         const cur = this.current();
         if (!cur) { this.leave(); this.setState("idle", "Queue finished"); return; }
 
-        // a "train to level" entry never runs itself: it works out the next batch of steps, puts them above itself, and comes back
-        if (cur.kind === "train") {
-          const sk = skillById(cur.skillId);
-          if (!sk || sk.level >= cur.targetLevel) { this.finish(cur); continue; }
-          const xpNow = Math.floor(sk.xp ?? 0);
-          if (cur.lastXp !== undefined && xpNow <= cur.lastXp) cur.stall = (cur.stall ?? 0) + 1; else cur.stall = 0;
-          cur.lastXp = xpNow;
-          if (cur.stall >= 2) { this.block(cur, "training isn't giving any XP, so the plan stopped. Check the steps above it"); return; }
-          const nb = nextBatch(cur);
-          if (!nb.ok) { this.block(cur, nb.reason); return; }
-          cur.now = nb.note;
-          if (nb.to !== undefined) cur.afterLevel = nb.to;
-          Queue.insertBefore(cur.id, nb.entries);
-          continue;
-        }
-
         // a different entry is now on top (we just started, or something was added above): switch to it
         if (this.activeId !== cur.id) {
           this.leave();
@@ -1272,7 +1255,6 @@ export function setup(ctx) {
             if (cur.matStall >= 2) { this.block(cur, "getting the materials didn't lead to any XP, so the plan stopped. Check the steps above it"); return; }
             const mb = xpMaterialBatch(cur);
             if (!mb.ok) { this.block(cur, mb.reason); return; }
-            if (mb.trainable) { cur.now = mb.note; cur.afterLevel = mb.to; }
             Queue.insertBefore(cur.id, mb.entries);
             continue;
           }
@@ -1358,9 +1340,9 @@ export function setup(ctx) {
   const xpMaterialBatch = (e) => {
     const skill = skillById(e.skillId);
     if (!skill) return { ok: false, reason: "this skill wasn't found in your game version" };
-    if (isTrainable(skill)) {
+    if (isPlannable(skill)) {
       const r = nextBatch({ id: e.id, skillId: skill.id, targetLevel: levelForXp(e.targetXp, levelCapFor(skill)), targetXp: e.targetXp, forced: "" });
-      return r.ok ? { ...r, trainable: true } : r;
+      return r;
     }
     const best = xpCandidates(skill, true)[0];
     if (!best) return { ok: false, reason: `nothing to train at ${nm(skill)} level ${skill.level}` };
@@ -1398,19 +1380,18 @@ export function setup(ctx) {
     for (const x of entries) x.parent = e.parent ?? e.id;
     return { ok: true, entries, remaining };
   };
-  // ---------- train a skill (no Township task needed) ----------
-  // Two goals: make an amount of an item, or train to a level. A level goal never farms blindly: every method is ranked
+  // ---------- XP planning (used by XP tasks) ----------
+  // An XP goal never farms blindly: every method is ranked
   // by XP per hour of ALL the work it takes (gathering its materials included), and the plan only switches method when a
   // clearly better one opens up. The queue plans one batch at a time, so it always uses your real level and bank.
-  const TRAINABLE = new Set([
+  const PLANNABLE = new Set([
     "melvorD:Woodcutting", "melvorD:Mining", "melvorD:Fishing", "melvorD:Cooking", "melvorD:Smithing",
     "melvorD:Fletching", "melvorD:Crafting", "melvorD:Runecrafting", "melvorD:Herblore",
   ]);
-  const isTrainable = (s) => !!s && TRAINABLE.has(s.id);
+  const isPlannable = (s) => !!s && PLANNABLE.has(s.id);
   const levelIn = (skill, lv) => (lv && lv.has(skill.id) ? lv.get(skill.id) : skill.level);
   const xpAt = (l) => { try { return exp.level_to_xp(l); } catch (e) { return 0; } };
   const levelCapFor = (s) => (s.level >= 99 ? 120 : 99);
-  const SWITCH_GAIN_MASTERY = 1.25; // with "prefer mastery XP" on, stay on a method longer so its mastery keeps growing
   const SWITCH_GAIN = 1.1; // keep the current method unless another is at least 10% faster, so plans don't split into tiny batches
 
   // time (ms) to get n of an item from scratch with things the queue can do itself; Infinity if it can't
@@ -1422,7 +1403,7 @@ export function setup(ctx) {
     if (depth > 10 || seen.has(item.id)) return NO;
     const c = idx.crafters.get(item.id)?.[0];
     if (c) {
-      if (!isTrainable(c.skill) || (c.a.level ?? 1) > levelIn(c.skill, lv)) return NO;
+      if (!isPlannable(c.skill) || (c.a.level ?? 1) > levelIn(c.skill, lv)) return NO;
       const opt = options(c.a)[0];
       const sr = succ(c.skill, c.a);
       const per = Math.max(1, (c.a.baseQuantity ?? 1) * opt.mult) * sr;
@@ -1438,7 +1419,7 @@ export function setup(ctx) {
       return { ms, xp };
     }
     const g = idx.gatherers.get(item.id)?.[0];
-    if (!g || !isTrainable(g.skill) || (g.a.level ?? 1) > levelIn(g.skill, lv)) return NO;
+    if (!g || !isPlannable(g.skill) || (g.a.level ?? 1) > levelIn(g.skill, lv)) return NO;
     const acts = n / Math.max(1, g.a.baseQuantity ?? 1);
     return { ms: acts * intervalMs(g.skill, g.a), xp: g.skill.id === skillId ? acts * (g.a.baseExperience ?? 0) : 0 };
   };
@@ -1450,8 +1431,8 @@ export function setup(ctx) {
     const g = a.product && idx.gatherers.get(a.product.id)?.[0];
     return c ? (c.a === a ? { craft: true } : null) : g && g.a === a ? { craft: false } : null;
   };
-  // training methods open at this level, best first by XP per hour of everything they need
-  const trainCands = (skill, lv) => {
+  // XP methods open at this level, best first by XP per hour of everything they need
+  const methodCands = (skill, lv) => {
     const out = [];
     const L = levelIn(skill, lv);
     for (const a of list(skill.actions)) {
@@ -1465,26 +1446,22 @@ export function setup(ctx) {
       let ms = intervalMs(skill, a), xpPer = a.baseExperience * sr;
       if (st.craft) for (const k of [...baseCosts(a), ...opt.costs]) if (k?.item) { const r = acquire(k.item, k.quantity, lv, skill.id); ms += r.ms; xpPer += r.xp; }
       if (!isFinite(ms) || ms <= 0) continue;
-      let mast = 0;
-      if (Settings.preferMastery() && a.hasMastery !== false) {
-        try { if (skill.getMasteryLevel(a) < 99) mast = Number(skill.getMasteryXPToAddForAction(a, intervalMs(skill, a))) || 0; } catch (e) { /* ignore */ }
-      }
       const rate = (xpPer / ms) * 3600000;
-      out.push({ a, per, ms, xpPer, mast, rate, score: ((xpPer + mast) / ms) * 3600000 });
+      out.push({ a, per, ms, xpPer, rate, score: rate });
     }
     return out.sort((x, y) => y.score - x.score);
   };
-  const trainPlan = (skill, target, forcedId, fromLevel = skill.level, fromXp = skill.xp ?? 0, seed = null) => {
+  const levelPlan = (skill, target, forcedId, fromLevel = skill.level, fromXp = skill.xp ?? 0, seed = null) => {
     const sim = new Map(seed ?? []);
     const batches = [];
     let L = fromLevel, cur = null, blocked = null;
     for (let guard = 0; L < target && guard < 140; guard++) {
       sim.set(skill.id, L);
-      let cands = trainCands(skill, sim);
+      let cands = methodCands(skill, sim);
       if (forcedId) cands = cands.filter((c) => c.a.id === forcedId);
       if (!cands.length) { blocked = L; break; }
       let pick = cands[0];
-      if (cur) { const same = cands.find((c) => c.a === cur.c.a); if (same && pick.score < same.score * (Settings.preferMastery() ? SWITCH_GAIN_MASTERY : SWITCH_GAIN)) pick = same; }
+      if (cur) { const same = cands.find((c) => c.a === cur.c.a); if (same && pick.score < same.score * SWITCH_GAIN) pick = same; }
       if (!cur || cur.c.a !== pick.a) { cur = { c: pick, from: L, to: L }; batches.push(cur); }
       L++;
       cur.to = L;
@@ -1500,57 +1477,11 @@ export function setup(ctx) {
     }
     return { batches, totalMs: total, blocked };
   };
-  // Another skill can hold a better method back (steel needs coal, which needs Mining 30). Work out whether training that skill first
-  // gets you to the target sooner, counting the time it takes. Returns { skill, level, saveMs } or null.
-  const detourMemo = new Map();
-  const GATHER_SKILLS = ["melvorD:Mining", "melvorD:Woodcutting", "melvorD:Fishing"];
-  const bestDetour = (skill, target, fromLevel = skill.level, fromXp = skill.xp ?? 0) => {
-    if (!isTrainable(skill) || target - fromLevel < 3) return null;
-    const lvKey = GATHER_SKILLS.map((id) => skillById(id)?.level ?? 0).join(",");
-    const key = `${skill.id}|${fromLevel}|${target}|${lvKey}|${Settings.preferMastery()}`;
-    if (detourMemo.has(key)) return detourMemo.get(key);
-    if (detourMemo.size > 100) detourMemo.clear();
-    let best = null;
-    try {
-      const base = trainPlan(skill, target, "", fromLevel, fromXp);
-      const T0 = base.blocked != null ? Infinity : base.totalMs;
-      const bestRate = (lv, L) => trainCands(skill, lv.set(skill.id, L))[0]?.score ?? 0;
-      for (const sid of GATHER_SKILLS) {
-        const S = skillById(sid);
-        if (!S || sid === skill.id || !isTrainable(S)) continue;
-        const levels = [...new Set(list(S.actions).filter((a) => (!a.realm || a.realm.id === MELVOR_REALM) && (a.level ?? 1) > S.level && (a.level ?? 1) <= S.level + 30).map((a) => a.level ?? 1))].sort((x, y) => x - y);
-        for (const R of levels) {
-          // quick filter: does opening this level make any method better, now or near the end of the run?
-          const early = bestRate(new Map(), fromLevel), earlyR = bestRate(new Map([[S.id, R]]), fromLevel);
-          const late = bestRate(new Map(), target - 1), lateR = bestRate(new Map([[S.id, R]]), target - 1);
-          if (!(earlyR > early * 1.1 || lateR > late * 1.1 || (early === 0 && earlyR > 0) || (late === 0 && lateR > 0))) continue;
-          const det = trainPlan(S, R, "", S.level, S.xp ?? 0);
-          if (det.blocked != null || !det.batches.length) continue;
-          const after = trainPlan(skill, target, "", fromLevel, fromXp, new Map([[S.id, R]]));
-          if (after.blocked != null) continue;
-          const T1 = det.totalMs + after.totalMs;
-          if (T1 < T0 * 0.9 && (T0 === Infinity || T0 - T1 > 120000) && (!best || T1 < best.T1)) best = { skill: S, level: R, T0, T1, saveMs: T0 - T1, detourMs: det.totalMs };
-        }
-      }
-    } catch (e) { console.warn("[Township Task Helper] detour check failed", e); }
-    detourMemo.set(key, best);
-    return best;
-  };
-  // the next batch of real queue steps for a "train" entry, planned from the player's level and bank right now
+  // the next batch of real queue steps for an XP goal, planned from the player's level and bank right now
   const nextBatch = (e) => {
     const skill = skillById(e.skillId);
     if (!skill) return { ok: false, reason: "this skill wasn't found in your game version" };
-    if (!e.forced && !e.noDetour) {
-      const dt = bestDetour(skill, e.targetLevel);
-      if (dt && (skillById(dt.skill.id)?.level ?? 0) < dt.level) {
-        return {
-          ok: true, detour: true, to: undefined,
-          entries: [{ kind: "train", skillId: dt.skill.id, targetLevel: dt.level, targetXp: xpAt(dt.level), qty: xpAt(dt.level), noDetour: true, parent: e.id, label: `${nm(dt.skill)}: reach level ${dt.level} (opens better ${nm(skill)} methods)` }],
-          note: `${nm(dt.skill)} to level ${dt.level} first, saves about ${fmtDur(dt.saveMs)} on ${nm(skill)}`,
-        };
-      }
-    }
-    const plan = trainPlan(skill, e.targetLevel, e.forced);
+    const plan = levelPlan(skill, e.targetLevel, e.forced);
     if (!plan.batches.length) {
       const fa = e.forced && actionById(skill, e.forced);
       return { ok: false, reason: fa ? `${nm(fa)} can't be trained by the queue at level ${skill.level}` : `nothing at ${nm(skill)} level ${skill.level} can be trained by the queue on its own (it may need shop items or monster drops)` };
@@ -1568,21 +1499,6 @@ export function setup(ctx) {
     if (e.targetXp !== undefined && e.targetXp <= xpAt(b.to)) last.untilXp = e.targetXp;
     for (const x of entries) x.parent = e.id;
     return { ok: true, entries, to: b.to, note: `${nm(b.c.a)} until level ${b.to} (about ${Math.round(b.c.rate).toLocaleString()} XP/h)` };
-  };
-  const estMemo = new Map();
-  const trainEstimate = (e) => {
-    const sk = skillById(e.skillId);
-    if (!sk) return null;
-    const fromL = e.afterLevel && e.afterLevel > sk.level ? e.afterLevel : sk.level;
-    const key = `${e.id}|${fromL}|${e.targetLevel}|${Settings.preferMastery()}`;
-    if (estMemo.has(key)) return estMemo.get(key);
-    if (estMemo.size > 200) estMemo.clear();
-    const fromXp = fromL === sk.level ? (sk.xp ?? 0) : xpAt(fromL);
-    const plan = trainPlan(sk, e.targetLevel, e.forced, fromL, fromXp);
-    const dt = !e.forced && !e.noDetour ? bestDetour(sk, e.targetLevel, fromL, fromXp) : null;
-    const ms = dt ? dt.T1 : plan.blocked != null ? null : plan.totalMs;
-    estMemo.set(key, ms);
-    return ms;
   };
   // ---------- floating panel ----------
   const levelIssue = (e) => {
@@ -1662,8 +1578,7 @@ export function setup(ctx) {
       return el;
     },
     row(e) {
-      const isTrain = e.kind === "train";
-      const isXp = e.kind === "xp" || isTrain;
+      const isXp = e.kind === "xp";
       const isCombat = e.kind === "combat";
       const item = isXp ? skillById(e.skillId) : isCombat ? game.monsters.getObjectByID(e.monsterId) : itemById(e.itemId);
       const manual = e.kind === "manual";
@@ -1675,13 +1590,12 @@ export function setup(ctx) {
         : warn ? '<i class="fa fa-exclamation-triangle text-warning mr-2"></i>'
         : '<i class="fa fa-circle mr-2" style="opacity:.25;font-size:8px;vertical-align:middle"></i>';
       const showProgress = !manual && !done && (isXp || isCombat || (e.startQty !== undefined && (e.status === "active" || e.status === "blocked" || Runner.gained(e) > 0)));
-      const amount = isCombat ? `<b>${Runner.gained(e).toLocaleString()} / ${Number(e.targetKills).toLocaleString()} kills</b>` : isTrain ? `<b>Level ${(skillById(e.skillId)?.level ?? 0)} / ${e.targetLevel}</b>` : isXp ? `<b>${Runner.gained(e).toLocaleString()} / ${Number(e.targetXp).toLocaleString()} XP</b>` : showProgress ? `<b>${Runner.gained(e).toLocaleString()} / ${Number(e.qty).toLocaleString()}</b>` : `<b>x${Number(e.qty).toLocaleString()}</b>`;
+      const amount = isCombat ? `<b>${Runner.gained(e).toLocaleString()} / ${Number(e.targetKills).toLocaleString()} kills</b>` : isXp ? `<b>${Runner.gained(e).toLocaleString()} / ${Number(e.targetXp).toLocaleString()} XP</b>` : showProgress ? `<b>${Runner.gained(e).toLocaleString()} / ${Number(e.qty).toLocaleString()}</b>` : `<b>x${Number(e.qty).toLocaleString()}</b>`;
       const btn = (act, ic, title) =>
         `<a data-act="${act}" data-id="${esc(e.id)}" class="pointer-enabled text-white-50 ml-2" title="${title}"><i class="fa ${ic}"></i></a>`;
       const sub = done && e.sold ? `<br><small class="text-muted">${esc(e.sold)}</small>`
         : e.reason ? `<br><small class="text-warning">${esc(e.reason)}</small>`
         : issue ? `<br><small class="text-warning"><i class="fa fa-exclamation-triangle"></i> ${esc(issue)}</small>`
-        : isTrain && e.now && !done ? `<br><small class="text-muted">now: ${esc(e.now)}</small>`
         : isXp && e.status === "active" && e.method ? `<br><small class="text-muted">using ${esc(e.method)}</small>`
         : manual && !done ? `<br><small class="text-muted">do this yourself${e.status === "waiting" ? " (waiting for you)" : ""}</small>` : "";
       return (
@@ -1767,7 +1681,6 @@ export function setup(ctx) {
       bar.appendChild(b);
       updateBadge();
     }
-    document.getElementById("mbd-train-btn")?.remove(); // the Train a skill button moved to its own mod, Skill Trainer
     const ref = [...bar.children].find((c) => c !== b && c.offsetWidth > 0);
     if (ref) { b.style.width = ref.offsetWidth + "px"; b.style.height = ref.offsetHeight + "px"; }
   };
@@ -1958,7 +1871,7 @@ export function setup(ctx) {
         itemMissing, areaMissing, missingHtml, reqText, buildRows, toEntries, itemSection, sourceHtml, buyHtml, buyFromShop, wikiUrl,
         monsterSection, foodHtml, setsHtml, describeGoal, entryKey, addUnique, dupHtml, tellPlayer, xpCandidates, xpSection, estimateMs,
         startAction, startEntry, killEntry, areaFor, obtainable, fire,
-        succ, bestDetour, xpMaterialBatch, restockCraft, trainPlan, trainCands, acquireMs, nextBatch, trainEstimate, fmtDur, Astro, Farm, farmSkills, farmFights, farmPlan, fightSafety, monsterMaxHit, dropPerKill, isFarmItem, farmHtml, astroCons, astroOptions, bestCon, astroHtml, isAstroItem,
+        succ, xpMaterialBatch, restockCraft, levelPlan, methodCands, acquireMs, nextBatch, fmtDur, Astro, Farm, farmSkills, farmFights, farmPlan, fightSafety, monsterMaxHit, dropPerKill, isFarmItem, farmHtml, astroCons, astroOptions, bestCon, astroHtml, isAstroItem,
       },
     };
     LOG("installed", VERSION);
