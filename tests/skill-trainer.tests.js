@@ -92,6 +92,7 @@
   // =====================================================================================
   // Game contract: the game things the mod relies on. A failure here after a game update tells you what moved.
   // =====================================================================================
+  const aMonster = () => list(game.monsters).find((m) => D().areaFor(m));
   const G = "Game contract";
   test(G, "XP table matches the known values", () => { eq(exp.level_to_xp(99), 13034431, "level 99"); ok(exp.level_to_xp(50) > 100000 && exp.level_to_xp(50) < 102000, "level 50"); });
   test(G, "skill methods used to start actions exist", () => {
