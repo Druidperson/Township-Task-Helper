@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.17.0
+- New: Farming steps now use compost. If you have Weird Gloop or Compost in your bank, it goes on the plots before planting, so crops grow every time and the queue stops planting extras.
+- New: if you're short on Compost, the queue buys it from the shop. It never spends more than a tenth of your gold on one purchase. You can turn this off in the mod settings with "Buy compost for Farming steps".
+- New: if you don't have enough seeds, the queue adds a fight for them in front of the Farming step. If a monster drops the crop itself and that's quicker, it fights for the crop instead. If the fight isn't safe for you, the step tells you why.
+- Time estimates for tasks that need crops now include the time to get the seeds.
+
 ## 0.16.0
 - New: Farming. Queue steps can now plant and harvest crops, so tasks that need Potatoes, herbs and other crops no longer ask you to grow them yourself. It uses the seeds you already own and the plots you've unlocked, and it never buys anything.
 - New: Farming works as an XP goal too. The queue picks the best crop you can plant and keeps replanting until you reach the target.
