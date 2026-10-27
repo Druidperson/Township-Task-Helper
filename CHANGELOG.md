@@ -4,7 +4,8 @@
 - New: gems are now farmed by skilling. Topaz, Sapphire, Ruby, Emerald and Diamond are found while mining, and fishing areas that give special finds can drop them too, so the picker lists both and defaults to the best XP/hour.
 - New: Bobby's Pocket and Chapeau Noir are farmed with Thieving. Any target can drop them with a small chance, so the picker lists every target you can use and defaults to the best XP/hour.
 - New: the Amulet of Fishing is farmed by fishing. It sits inside the Treasure Chest, so the odds count the chance of a special find, of that find being a chest, and of the chest holding the amulet.
-- Fixed: queue steps can now start Thieving, which they couldn't before.
+- New: Holy Dust tasks now work. The Blessed Offering spell is treated as a recipe, so the task breaks down into Nature and Earth runes (farmed through Runecrafting) and a Magic step that casts the spell. It needs Magic level 56, and the usual level warning shows if you're below it.
+- Fixed: queue steps can now start Thieving and cast Magic spells, which they couldn't before.
 
 ## 0.14.0
 - New: the training planner looks ahead across skills. If a better method is held back by another skill's level (iron bars need Mining 15, steel needs coal), it works out whether training that skill first gets you to the target sooner, and if it does, it adds that training as the first step. It only does this when the total time is at least 10% shorter, and the popup shows what it will do and how much it saves.

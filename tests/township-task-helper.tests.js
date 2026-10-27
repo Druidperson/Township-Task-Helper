@@ -1233,7 +1233,7 @@
   }));
   test(HD, "Blessed Offering is the only spell turned into a recipe", () => sandbox(async () => {
     D().toEntries(D().buildRows(itm("melvorF:Holy_Dust"), 3));
-    const spells = game.skills.getObjectByID("melvorD:Magic").actions.allObjects.filter((a) => "itemCosts" in a).map((a) => a.id);
+    const spells = game.skills.getObjectByID("melvorD:Magic").actions.allObjects.filter((a) => Object.prototype.hasOwnProperty.call(a, "itemCosts")).map((a) => a.id);
     eq(spells.join(), "melvorF:BlessedOffering");
   }));
 

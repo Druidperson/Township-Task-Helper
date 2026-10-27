@@ -111,7 +111,7 @@ export function setup(ctx) {
   const decorateSpells = (skill) => {
     for (const sp of list(skill.actions)) {
       try {
-        if (sp.produces?.id !== "melvorF:Holy_Dust" || !(sp.runesRequired?.length) || sp.specialCost?.type !== -5 || "itemCosts" in sp) continue;
+        if (sp.produces?.id !== "melvorF:Holy_Dust" || !(sp.runesRequired?.length) || sp.specialCost?.type !== -5 || Object.prototype.hasOwnProperty.call(sp, "itemCosts")) continue;
         Object.defineProperties(sp, {
           itemCosts: { get: () => sp.runesRequired.map((r) => ({ item: r.item, quantity: r.quantity })), configurable: true },
           product: { get: () => sp.produces, configurable: true },
