@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.17.1
+- The download is about a third smaller. Nothing changed in how the mod works.
+
 ## 0.17.0
 - New: Farming steps now use compost. If you have Weird Gloop or Compost in your bank, it goes on the plots before planting, so crops grow every time and the queue stops planting extras.
 - New: if you're short on Compost, the queue buys it from the shop. It never spends more than a tenth of your gold on one purchase. You can turn this off in the mod settings with "Buy compost for Farming steps".
