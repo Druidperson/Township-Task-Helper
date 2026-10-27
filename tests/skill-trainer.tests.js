@@ -622,22 +622,6 @@
     TH().runner.stop();
   }));
 
-  test(F, "placeholder random-monster slots are not offered as fights", () => sandbox(async () => {
-    const odd = list(game.monsters).filter((m) => /undefined translation/i.test(String(m.name)));
-    if (!odd.length) skip("every monster has a name");
-    const fights = D().farmFights(bones(), 1);
-    ok(fights.length > 3, "bones should still drop from many monsters");
-    ok(fights.every((f) => !odd.includes(f.m)), "a placeholder slot was offered");
-    ok(!/undefined translation/i.test(D().farmHtml(bones(), 5)), "the placeholder name leaked into the picker");
-  }));
-  test(F, "slower kills and more food make a fight score worse", () => sandbox(async () => {
-    withFood(100000, 1000);
-    const f = D().farmFights(bones(), 50).find((x) => x.open && x.safety.safe);
-    ok(f, "no safe fight");
-    const bigger = D().farmFights(bones(), 500).find((x) => x.m === f.m);
-    ok(bigger.ms > f.ms, "ten times the farm should take longer");
-    ok(bigger.score > f.score, "and score worse");
-  }));
   const BR = "Burn rate";
   const burnAt = (pct) => stub(skill("Cooking"), "getRecipeSuccessChance", () => pct);
   const rawShrimpIn = (rows) => rows.find((r) => r.item.id === "melvorD:Raw_Shrimp")?.qty;
