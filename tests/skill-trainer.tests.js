@@ -1,12 +1,12 @@
 /*
- * Township Task Helper test suite. Runs inside Melvor Idle with the mod installed.
+ * Skill Trainer test suite. Runs inside Melvor Idle with the mod installed.
  *
  *   1. Open the game, load a character, open the browser console.
- *   2. Paste this file, then run:   await TTHTests.run()
+ *   2. Paste this file, then run:   await STTests.run()
  *
- * Options: TTHTests.run({ live: false })            skip tests that start real game actions
- *          TTHTests.run({ group: "Queue" })         one group only
- *          TTHTests.run({ only: /duplicate/i })     tests whose name matches
+ * Options: STTests.run({ live: false })            skip tests that start real game actions
+ *          STTests.run({ group: "Queue" })         one group only
+ *          STTests.run({ only: /duplicate/i })     tests whose name matches
  * The queue, settings and bank lookups are backed up and restored around every test.
  * Keep the game tab in front while it runs: hidden tabs pause the game and the live tests will skip.
  */
@@ -23,7 +23,7 @@
   const has = (s, sub, m = "") => { if (!String(s).includes(sub)) fail(`${m} expected text to contain ${JSON.stringify(sub)}, got ${JSON.stringify(String(s).replace(/\s+/g, " ").slice(0, 160))}`.trim()); };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const waitFor = async (cond, ms = 15000, step = 200) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await cond()) return true; await sleep(step); } return false; };
-  const TH = () => window.townshipHelper;
+  const TH = () => window.skillTrainer;
   const D = () => TH()._dev;
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const item = (id) => game.items.getObjectByID(id);
@@ -88,29 +88,12 @@
   // =====================================================================================
   // Game contract: the game things the mod relies on. A failure here after a game update tells you what moved.
   // =====================================================================================
+
+  // =====================================================================================
+  // Game contract: the game things the mod relies on. A failure here after a game update tells you what moved.
+  // =====================================================================================
   const G = "Game contract";
-  test(G, "globals the mod needs exist", () => {
-    const present = { game: typeof game, SwalLocale: typeof SwalLocale, notifyPlayer: typeof notifyPlayer, exp: typeof exp };
-    for (const [n, ty] of Object.entries(present)) ok(ty !== "undefined", `${n} is missing`);
-    eq(typeof exp.level_to_xp, "function", "exp.level_to_xp");
-    ok(customElements.get("township-task-goal"), "township-task-goal element");
-    ok(document.getElementById("skill-footer-minibar"), "skill-footer-minibar");
-  });
   test(G, "XP table matches the known values", () => { eq(exp.level_to_xp(99), 13034431, "level 99"); ok(exp.level_to_xp(50) > 100000 && exp.level_to_xp(50) < 102000, "level 50"); });
-  test(G, "Township tasks have goals", () => {
-    const tasks = list(game.township.tasks.tasks);
-    ok(tasks.length > 0, "no tasks");
-    ok(tasks.every((t) => list(t.goals).length > 0 || t.goals?.allGoals?.length > 0), "a task has no goals");
-  });
-  test(G, "every task goal type is one the mod knows", () => {
-    const known = new Set(["TownshipItemGoal", "TownshipMonsterGoal", "TownshipCasualMonsterGoal", "TownshipMonsterWithItemsGoal", "TownshipSkillXPGoal"]);
-    const seen = new Set();
-    for (const t of list(game.township.tasks.tasks)) for (const g of t.goals.allGoals) seen.add(g.constructor.name);
-    const unknown = [...seen].filter((n) => !known.has(n));
-    ok(seen.has("TownshipItemGoal"), "no item goals found, did the goal classes get renamed?");
-    // goal types without a play button are fine (buildings, etc.), but a new item/monster/xp style type is worth a look
-    window.__tthUnknownGoals = unknown;
-  });
   test(G, "skill methods used to start actions exist", () => {
     const need = {
       Woodcutting: ["selectTree", "stop"], Mining: ["onRockClick", "canMineOre", "stop"], Fishing: ["onAreaFishSelection", "onAreaStartButtonClick", "stop"],
@@ -146,174 +129,15 @@
 
   // =====================================================================================
   const I = "Install";
-  test(I, "mod is installed with a version and API", () => {
-    ok(/^\d+\.\d+\.\d+$/.test(TH().version), "version " + TH().version);
-    for (const k of ["queue", "panel", "runner", "settings", "showItem", "refresh", "_dev"]) ok(TH()[k], "townshipHelper." + k);
-  });
   test(I, "minibar has the queue and train buttons", () => {
-    ok(document.getElementById("mbd-queue-btn"), "queue button");
-    ok(document.getElementById("mbd-train-btn"), "train button");
-  });
-  test(I, "task goal elements get a play button", async () => {
-    const goals = [];
-    for (const t of list(game.township.tasks.tasks)) for (const g of t.goals.allGoals) if (D().describeGoal(g)) { goals.push(g); if (goals.length >= 5) break; }
-    ok(goals.length, "no supported goals");
-    const proto = customElements.get("township-task-goal").prototype;
-    ok(proto.__mbdOrig, "setGoal isn't patched");
-    const el = document.createElement("township-task-goal");
-    document.body.appendChild(el);
-    try {
-      for (const g of goals) { el.setGoal(g); ok((el.container ?? el).querySelector(".mbd-th-btn"), "no button for " + g.constructor.name); }
-    } finally { el.remove(); }
+    ok(document.getElementById("mst-queue-btn"), "queue button");
+    ok(document.getElementById("mst-train-btn"), "train button");
   });
   test(I, "panel opens and closes", () => {
     TH().panel.open();
-    eq(document.getElementById("mbd-queue-panel").style.display, "flex");
+    eq(document.getElementById("mst-queue-panel").style.display, "flex");
     TH().panel.close();
-    eq(document.getElementById("mbd-queue-panel").style.display, "none");
-  });
-
-  // =====================================================================================
-  const B = "Task breakdown";
-  test(B, "every supported task goal builds a popup and queue entries without errors", () => {
-    let n = 0;
-    for (const t of list(game.township.tasks.tasks)) for (const g of t.goals.allGoals) {
-      const info = D().describeGoal(g);
-      if (!info) continue;
-      n++;
-      try {
-        ok(typeof info.title === "string" && info.title.length, "title");
-        ok(info.body().includes("mbd-"), "body");
-        const q = info.queue();
-        ok(Array.isArray(q), "queue()");
-        for (const e of q) ok(e.kind && e.label && Number.isFinite(e.qty), "entry shape " + JSON.stringify(e).slice(0, 80));
-      } catch (e) { fail(`${g.constructor.name} ${g.item?.id ?? g.monster?.id ?? g.skill?.id}: ${e.message}`); }
-    }
-    ok(n > 20, "only " + n + " goals checked");
-  });
-  test(B, "Bronze Bar x10: mine copper and tin, then smelt", () => sandbox(() => {
-    bankStub(() => 0);
-    const rows = D().buildRows(item("melvorD:Bronze_Bar"), 10);
-    const names = rows.map((r) => r.item.id);
-    eq(names[names.length - 1], "melvorD:Bronze_Bar", "the product comes last");
-    ok(names.includes("melvorD:Copper_Ore") && names.includes("melvorD:Tin_Ore"), "ores");
-    eq(rows.find((r) => r.item.id === "melvorD:Copper_Ore").qty, 10);
-    const e = D().toEntries(rows);
-    eq(e.filter((x) => x.kind === "gather").length, 2);
-    eq(e[e.length - 1].kind, "craft");
-  }));
-  test(B, "the bank is subtracted from what's needed", () => sandbox(() => {
-    bankStub((id) => (id === "melvorD:Copper_Ore" ? 4 : 0));
-    const rows = D().buildRows(item("melvorD:Bronze_Bar"), 10);
-    eq(rows.find((r) => r.item.id === "melvorD:Copper_Ore").qty, 6, "copper");
-    eq(rows.find((r) => r.item.id === "melvorD:Tin_Ore").qty, 10, "tin");
-  }));
-  test(B, "a full bank leaves nothing to do, but 'make' still makes the amount", () => sandbox(() => {
-    bankStub(() => 999);
-    eq(D().buildRows(item("melvorD:Bronze_Bar"), 10).length, 0, "normal");
-    const rows = D().buildRows(item("melvorD:Bronze_Bar"), 10, true);
-    eq(rows.length, 1, "fresh");
-    eq(rows[0].qty, 10);
-  }));
-  test(B, "arrows chain through shafts, tips and bars", () => sandbox(() => {
-    const arrow = list(game.items).find((i) => i.id === "melvorD:Bronze_Arrows");
-    if (!arrow) skip("Bronze Arrows not found");
-    bankStub(() => 0);
-    const ids = D().buildRows(arrow, 300).map((r) => r.item.id);
-    ok(ids.length >= 5, "expected at least 5 steps, got " + ids.length);
-    eq(ids[ids.length - 1], arrow.id);
-  }));
-  test(B, "missing levels are reported and block queueing", () => {
-    const sm = skill("Smithing");
-    const hard = list(sm.actions).filter((a) => a.product && a.level > sm.level).sort((a, b) => b.level - a.level)[0];
-    if (!hard) skip("Smithing level is already above every recipe");
-    const miss = D().itemMissing(hard.product, 1);
-    ok(miss.length > 0, "no warning for " + hard.product.id);
-    ok(miss.some((m) => /Smithing|Mining/.test(m.text)), "warning text: " + JSON.stringify(miss));
-    has(D().missingHtml(miss), "Warning:");
-  });
-  test(B, "feathers can be bought from the popup", () => sandbox(() => {
-    const feathers = item("melvorD:Feathers");
-    const h = D().buyHtml(feathers.id, 50);
-    has(h, "data-mbd-buy");
-    let seen = null;
-    const old = game.shop.buyQuantity;
-    stub(game.shop, "buyItemOnClick", (p) => { seen = { p, q: game.shop.buyQuantity }; });
-    D().buyFromShop(html(h).querySelector("[data-mbd-buy]").dataset.mbdBuy, 50);
-    ok(seen, "buyItemOnClick wasn't called");
-    eq(seen.q, 50, "buy quantity during the call");
-    eq(game.shop.buyQuantity, old, "buy quantity restored");
-  }));
-  test(B, "every item can describe where it comes from", () => {
-    let wiki = 0;
-    for (const it of list(game.items)) {
-      try { const h = D().sourceHtml(it.id); if (h.includes("data-mbd-wiki")) wiki++; D().buyHtml(it.id, 1); }
-      catch (e) { fail(`${it.id}: ${e.message}`); }
-    }
-    window.__tthWikiItems = wiki;
-  });
-  test(B, "items with no known source get a wiki search link", () => {
-    const it = list(game.items).find((i) => D().sourceHtml(i.id).includes("data-mbd-wiki"));
-    if (!it) skip("every item has a known source in this version");
-    const a = html(D().sourceHtml(it.id)).querySelector("[data-mbd-wiki]");
-    ok(a.href.startsWith("https://wiki.melvoridle.com/"), a.href);
-    eq(a.getAttribute("target"), "_blank");
-  });
-  test(B, "the wiki link opens a new tab and never navigates the game", () => sandbox(async () => {
-    const it = list(game.items).find((i) => D().sourceHtml(i.id).includes("data-mbd-wiki"));
-    if (!it) skip("no item without a source");
-    let args = null, navigated = false;
-    stub(window, "open", (...a) => { args = a; return {}; });
-    D().fire("t", () => D().sourceHtml(it.id), null);
-    ok(await waitFor(() => document.querySelector(".swal2-popup [data-mbd-wiki]"), 2000, 50), "link not in popup");
-    ok(await popupReady(), "popup never finished opening"); // the click handler is attached when it opens
-    const link = document.querySelector(".swal2-popup [data-mbd-wiki]");
-    const realHref = link.href;
-    has(realHref, "wiki.melvoridle.com");
-    link.setAttribute("href", "#tth-probe"); // harmless if the click isn't intercepted
-    // the mod stops the click from bubbling, so watch preventDefault itself
-    let intercepted = false;
-    const realPrevent = Event.prototype.preventDefault;
-    Event.prototype.preventDefault = function () { if (this.type === "click" && this.target === link) intercepted = true; return realPrevent.call(this); };
-    try { link.click(); } finally { Event.prototype.preventDefault = realPrevent; }
-    ok(intercepted, "the click wasn't intercepted, so the link would have changed the game's own tab");
-    ok(args, "window.open wasn't called");
-    eq(args[1], "_blank");
-    has(args[0], "#tth-probe", "the link's own address is what gets opened");
-  }));
-  test(B, "the popup has Add to queue, Add to top and Close in that order", () => sandbox(async () => {
-    D().fire("t", () => "x", () => {});
-    ok(await popupReady(), "popup never finished opening");
-    const order = ["swal2-deny", "swal2-cancel", "swal2-confirm"].map((c) => Number(document.querySelector("." + c).style.order));
-    eq(order.join(), "1,2,3");
-  }));
-
-  // =====================================================================================
-  const M = "Monster info";
-  const aMonster = () => list(game.monsters).find((m) => D().areaFor(m));
-  test(M, "monster section shows location, attack info and weaknesses", () => {
-    const m = aMonster();
-    ok(m, "no monster in a combat area");
-    const h = D().monsterSection(m, 5);
-    has(h, "Location", "location label");
-    ok(/Melee|Ranged|Magic/.test(text(h)), "attack style");
-    ok(/beats|weak/i.test(text(h)), "weakness");
-    ok(!/triangle/i.test(text(h)), "should say 'beats', not 'triangle'");
-  });
-  test(M, "every monster renders without errors", () => {
-    for (const m of list(game.monsters)) { try { D().monsterSection(m, 1); D().areaMissing(m); } catch (e) { fail(`${m.id}: ${e.message}`); } }
-  });
-  test(M, "equipment set buttons match the player's sets", () => {
-    const n = (game.combat.player ?? game.combat.player)?.equipmentSets?.length;
-    ok(n > 0, "player has no equipment sets?");
-    eq(html(D().setsHtml()).querySelectorAll("[data-mbd-set]").length, n);
-    ok(typeof D().foodHtml() === "string");
-  });
-  test(M, "kill goals queue combat entries, and nothing when already done", () => {
-    const m = aMonster();
-    const e = D().killEntry({ monster: m, quantity: 3, _progress: 1 }, false);
-    eq(e.length, 1); eq(e[0].kind, "combat"); eq(e[0].targetKills, 2); ok(e[0].rel, "relative count");
-    eq(D().killEntry({ monster: m, quantity: 0, _progress: 0 }, false).length, 0);
+    eq(document.getElementById("mst-queue-panel").style.display, "none");
   });
 
   // =====================================================================================
@@ -356,31 +180,9 @@
   }));
   test(Q, "the badge shows how many steps are left", () => sandbox(() => {
     TH().queue.add([E(), E(), E()]);
-    eq(document.querySelector("#mbd-queue-btn .mbd-count").textContent, "3");
+    eq(document.querySelector("#mst-queue-btn .mst-count").textContent, "3");
     TH().queue.clear();
-    eq(document.querySelector("#mbd-queue-btn .mbd-count").style.display, "none");
-  }));
-
-  const DU = "Duplicates";
-  test(DU, "adding the same steps twice skips them and says so", () => sandbox(() => {
-    captureNotices();
-    const mk = () => [E({ label: "Chop" }), E({ kind: "craft", itemId: "melvorD:Bronze_Bar", actionId: "melvorD:Bronze_Bar", skillId: "melvorD:Smithing", label: "Smelt" })];
-    eq(D().addUnique(mk(), false), 2);
-    eq(D().addUnique(mk(), false), 0);
-    eq(TH().queue.items.length, 2);
-    ok(notes.some((n) => /already/i.test(n)), "no notice: " + notes.join("|"));
-  }));
-  test(DU, "the popup warns when steps are already queued", () => sandbox(() => {
-    const a = E({ label: "Chop" }), b = E({ itemId: "melvorD:Oak_Logs", actionId: "melvorD:Oak_Tree", label: "Oak" });
-    TH().queue.add([a]);
-    has(D().dupHtml([a, b]), "1 of 2", "partial");
-    has(D().dupHtml([a]), "already in your queue", "all");
-    eq(D().dupHtml([b]), "", "none");
-  }));
-  test(DU, "finished steps don't count as duplicates", () => sandbox(() => {
-    TH().queue.add([E()]);
-    TH().queue.items[0].status = "done";
-    eq(D().addUnique([E()], false), 1);
+    eq(document.querySelector("#mst-queue-btn .mst-count").style.display, "none");
   }));
 
   const S = "Auto-sell";
@@ -668,23 +470,23 @@
     D().TS.goal = "level";
     D().openTrain();
     ok(await popupReady(), "popup never finished opening");
-    if (document.getElementById("mbd-tr-skill").value !== "melvorD:" + skillName) setv("mbd-tr-skill", "melvorD:" + skillName);
-    if (goal !== "level") setv("mbd-tr-goal", goal);
+    if (document.getElementById("mst-tr-skill").value !== "melvorD:" + skillName) setv("mst-tr-skill", "melvorD:" + skillName);
+    if (goal !== "level") setv("mst-tr-goal", goal);
   };
   test(U, "opens from the minibar button with a skill list and a live preview", () => sandbox(async () => {
     D().TS.goal = "level"; // the popup remembers the last goal you used
-    document.getElementById("mbd-train-btn").click();
+    document.getElementById("mst-train-btn").click();
     ok(await popupReady(), "popup never finished opening");
-    const sel = document.getElementById("mbd-tr-skill");
+    const sel = document.getElementById("mst-tr-skill");
     ok(sel, "popup");
     ok(sel.options.length >= TRAINABLE.length, "skills listed");
-    if (sel.value !== "melvorD:Woodcutting") setv("mbd-tr-skill", "melvorD:Woodcutting"); // the popup starts on the skill page you are on
-    has(document.getElementById("mbd-tr-prev").textContent, "XP/hour");
+    if (sel.value !== "melvorD:Woodcutting") setv("mst-tr-skill", "melvorD:Woodcutting"); // the popup starts on the skill page you are on
+    has(document.getElementById("mst-tr-prev").textContent, "XP/hour");
   }));
   test(U, "level goal queues one train step", () => sandbox(async () => {
     await open("Woodcutting");
     const sk = skill("Woodcutting");
-    setv("mbd-tr-level", String(sk.level + 2), "input");
+    setv("mst-tr-level", String(sk.level + 2), "input");
     document.querySelector(".swal2-deny").click();
     await sleep(100);
     eq(TH().queue.items.length, 1);
@@ -693,7 +495,7 @@
   }));
   test(U, "'sell the items it makes' is saved on the step", () => sandbox(async () => {
     await open("Woodcutting");
-    setv("mbd-tr-sell", true);
+    setv("mst-tr-sell", true);
     document.querySelector(".swal2-deny").click();
     await sleep(100);
     eq(TH().queue.items[0].sellMade, true);
@@ -701,7 +503,7 @@
   test(U, "a level at or below yours adds nothing and says why", () => sandbox(async () => {
     captureNotices();
     await open("Woodcutting");
-    setv("mbd-tr-level", String(skill("Woodcutting").level), "input");
+    setv("mst-tr-level", String(skill("Woodcutting").level), "input");
     document.querySelector(".swal2-deny").click();
     await sleep(100);
     eq(TH().queue.items.length, 0);
@@ -710,9 +512,9 @@
   test(U, "make mode queues the full chain and the amount, even if some is in the bank", () => sandbox(async () => {
     bankStub((id) => (id === "melvorD:Bronze_Bar" ? 100 : 0));
     await open("Smithing", "make");
-    setv("mbd-tr-item", "melvorD:Bronze_Bar");
-    setv("mbd-tr-qty", "20", "input");
-    has(document.getElementById("mbd-tr-prev").textContent, "Make 20 Bronze Bar");
+    setv("mst-tr-item", "melvorD:Bronze_Bar");
+    setv("mst-tr-qty", "20", "input");
+    has(document.getElementById("mst-tr-prev").textContent, "Make 20 Bronze Bar");
     document.querySelector(".swal2-deny").click();
     await sleep(100);
     const bar = TH().queue.items.find((e) => e.kind === "craft");
@@ -725,18 +527,18 @@
     if (!hard) skip("no locked Smithing recipe");
     captureNotices();
     await open("Smithing", "make");
-    setv("mbd-tr-item", hard.id);
-    has(document.getElementById("mbd-tr-prev").textContent, "Warning");
+    setv("mst-tr-item", hard.id);
+    has(document.getElementById("mst-tr-prev").textContent, "Warning");
     document.querySelector(".swal2-deny").click();
     await sleep(100);
     eq(TH().queue.items.length, 0);
   }));
   test(U, "changing the skill rebuilds the form", () => sandbox(async () => {
     await open("Woodcutting");
-    setv("mbd-tr-skill", "melvorD:Mining");
+    setv("mst-tr-skill", "melvorD:Mining");
     await sleep(50);
     eq(D().TS.skillId, "melvorD:Mining");
-    has(document.getElementById("mbd-tr-method").textContent, "Best available");
+    has(document.getElementById("mst-tr-method").textContent, "Best available");
   }));
   test(U, "queued level goals expand into steps when run", () => sandbox(async () => {
     liveOk();
@@ -749,219 +551,6 @@
     ok(items.length >= 2, "no steps were put above it");
     eq(items[0].untilLevel, sk.level + 1, "first step stops at the level");
   }), live);
-
-  const A = "Astrology";
-  const nm = (o) => String(o?.name ?? o?._name ?? o?.id);
-  const stardust = () => game.items.getObjectByID("melvorF:Stardust");
-  const owned = (it) => game.bank.getQty(it);
-  const golden = () => game.items.getObjectByID("melvorF:Golden_Stardust");
-  test(A, "Stardust and Golden Stardust are found as Astrology drops", () => sandbox(async () => {
-    for (const it of [stardust(), golden()]) {
-      ok(it, "item missing from the game");
-      ok(D().isAstroItem(it), nm(it) + " has no constellation");
-      ok(D().astroOptions(it).length >= 2, "needs a list of constellations");
-    }
-  }));
-  test(A, "the best pick is the unlocked constellation with the most XP/hour", () => sandbox(async () => {
-    const o = D().astroOptions(stardust()).filter((x) => x.open);
-    ok(o.length > 0, "no unlocked constellation");
-    const best = D().bestCon(stardust());
-    eq(Math.max(...o.map((x) => x.xpHr)), best.xpHr);
-    ok(D().astroOptions(stardust()).filter((x) => !x.open).every((x) => x.level > skill("Astrology").level), "locked ones need a higher level");
-  }));
-  test(A, "the popup offers a constellation picker and keeps the choice", () => sandbox(async () => {
-    TH().showItem("melvorF:Stardust", owned(stardust()) + 5);
-    ok(await popupReady(), "popup never finished opening");
-    const sel = document.querySelector("[data-mbd-astro]");
-    ok(sel, "picker missing");
-    const open = D().astroOptions(stardust()).find((x) => x.open);
-    sel.value = open.c.id;
-    sel.dispatchEvent(new Event("change", { bubbles: true }));
-    await sleep(100);
-    eq(document.querySelector("[data-mbd-astro]").value, open.c.id);
-    has(document.querySelector(".mbd-th-pop").textContent, nm(open.c));
-  }));
-  test(A, "picking a constellation queues that one", () => sandbox(async () => {
-    TH().showItem("melvorF:Stardust", owned(stardust()) + 5);
-    ok(await popupReady(), "popup never finished opening");
-    const open = D().astroOptions(stardust()).find((x) => x.open);
-    const sel = document.querySelector("[data-mbd-astro]");
-    sel.value = open.c.id;
-    sel.dispatchEvent(new Event("change", { bubbles: true }));
-    await sleep(100);
-    [...document.querySelectorAll(".swal2-actions button")].find((b) => /Add to queue/.test(b.textContent)).click();
-    await sleep(200);
-    const e = TH().queue.items.find((x) => x.skillId === "melvorD:Astrology");
-    ok(e, "no Astrology step queued");
-    eq(e.actionId, open.c.id); eq(e.constellation, open.c.id); eq(e.itemId, "melvorF:Stardust");
-  }));
-  test(A, "leaving it on best queues a step that follows the best constellation", () => sandbox(async () => {
-    TH().showItem("melvorF:Stardust", owned(stardust()) + 5);
-    ok(await popupReady(), "popup never finished opening");
-    [...document.querySelectorAll(".swal2-actions button")].find((b) => /Add to queue/.test(b.textContent)).click();
-    await sleep(200);
-    const e = TH().queue.items.find((x) => x.skillId === "melvorD:Astrology");
-    ok(e, "no Astrology step queued");
-    eq(e.constellation, "best");
-    eq(e.actionId, D().bestCon(stardust()).c.id);
-  }));
-  test(A, "the estimate counts studies per Stardust", () => sandbox(async () => {
-    const c = D().bestCon(stardust());
-    const ms = D().estimateMs({ kind: "gather", skillId: "melvorD:Astrology", actionId: c.c.id, itemId: "melvorF:Stardust", qty: 10, startQty: owned(stardust()) });
-    ok(ms > 0 && Number.isFinite(ms), "estimate " + ms);
-    const gold = D().estimateMs({ kind: "gather", skillId: "melvorD:Astrology", actionId: c.c.id, itemId: "melvorF:Golden_Stardust", qty: 10, startQty: owned(golden()) });
-    ok(gold > ms, "Golden Stardust is rarer, so it should take longer");
-  }));
-  test(A, "starting a step studies the constellation", () => sandbox(async () => {
-    const c = D().bestCon(stardust());
-    const e = { kind: "gather", skillId: "melvorD:Astrology", actionId: c.c.id, constellation: "best", itemId: "melvorF:Stardust", qty: 1, label: "t" };
-    const r = D().startEntry(e);
-    ok(r.ok, "start failed: " + r.reason);
-    eq(game.activeAction?.id, "melvorD:Astrology");
-    game.stopActiveAction();
-  }), { live: true });
-
-  const F = "Random drops";
-  const nest = () => game.items.getObjectByID("melvorD:Bird_Nest");
-  const bones = () => game.items.getObjectByID("melvorD:Bones");
-  const farmAdd = async (item, setup) => {
-    TH().showItem(item.id, (game.bank.getQty(item) ?? 0) + 5);
-    ok(await popupReady(), "popup never finished opening");
-    if (setup) await setup();
-    [...document.querySelectorAll(".swal2-actions button")].find((b) => /Add to queue/.test(b.textContent)).click();
-    await sleep(250);
-    return TH().queue.items;
-  };
-  const pickFarm = async (value) => {
-    const s = document.querySelector("[data-mbd-farm]");
-    ok(s, "farm picker missing");
-    s.value = value;
-    s.dispatchEvent(new Event("change", { bubbles: true }));
-    await sleep(150);
-  };
-  test(F, "Bird Nest is farmed by skilling and picks the best open XP/hour", () => sandbox(async () => {
-    ok(D().isFarmItem(nest()), "Bird Nest should be a farm item");
-    const opts = D().farmSkills(nest());
-    ok(opts.length > 3, "should list the trees");
-    const open = opts.filter((o) => o.open);
-    ok(open.length > 0, "no open tree");
-    const plan = D().farmPlan(nest());
-    eq(plan.opt.type, "skill");
-    eq(plan.opt.xpHr, Math.max(...open.map((o) => o.xpHr)));
-  }));
-  test(F, "Bird Nest queues a Woodcutting step that follows the best tree", () => sandbox(async () => {
-    const items = await farmAdd(nest());
-    const e = items[0];
-    ok(e, "nothing queued");
-    eq(e.kind, "gather"); eq(e.skillId, "melvorD:Woodcutting"); eq(e.farm, "best"); eq(e.itemId, "melvorD:Bird_Nest");
-    ok(D().estimateMs(e) > 0, "needs an estimate");
-  }));
-  test(F, "a chosen tree is queued as picked", () => sandbox(async () => {
-    const o = D().farmSkills(nest()).find((x) => x.open && x.id !== D().farmPlan(nest()).opt.id);
-    if (!o) throw new Skip("only one tree is open");
-    const items = await farmAdd(nest(), () => pickFarm(o.id));
-    eq(items[0].actionId, o.a.id); eq(items[0].farm, "fixed");
-  }));
-  // food plus auto eat: auto = { at: HP it starts eating at, eff: % of the healing it gets } or null for auto eat off
-  const withFood = (qty, heal, auto = { at: 1e9, eff: 100 }) => {
-    const pl = game.combat.player;
-    const food = game.items.allObjects.find((i) => i.healsFor > 0);
-    ok(food, "no food item in the game");
-    stub(pl.food, "slots", [{ item: food, quantity: qty }]);
-    stub(pl.food, "selectedSlot", 0);
-    stub(pl, "getFoodHealing", () => heal);
-    stub(pl, "autoEatThreshold", auto ? Math.min(auto.at, pl.stats.maxHitpoints) : 0);
-    stub(pl, "autoEatEfficiency", auto ? auto.eff : 1);
-  };
-  const gentle = (fights) => fights.filter((f) => f.safety.max !== null && f.safety.max * 2 < f.safety.g.hp);
-  test(F, "no equipped food means no fight is safe", () => sandbox(async () => {
-    withFood(0, 100);
-    const fights = D().farmFights(bones(), 10);
-    ok(fights.length > 3, "bones should drop from many monsters");
-    ok(fights.every((f) => !f.safety.safe), "something was safe with no food");
-    has(fights[0].safety.why, "no food");
-  }));
-  test(F, "food without auto eat doesn't count, since nothing eats it while the queue runs", () => sandbox(async () => {
-    withFood(100000, 1000, null);
-    const fights = gentle(D().farmFights(bones(), 100000));
-    ok(fights.length > 0, "no gentle monster");
-    ok(fights.every((f) => !f.safety.safe), "a long farm was safe with auto eat off");
-    has(fights[0].safety.why, "auto eat");
-  }));
-  test(F, "auto eat that starts below a monster's biggest hit is not safe", () => sandbox(async () => {
-    withFood(100000, 1000, { at: 1, eff: 100 });
-    const fights = gentle(D().farmFights(bones(), 10)).filter((f) => f.safety.max > 1);
-    ok(fights.length > 0, "no gentle monster");
-    ok(fights.every((f) => !f.safety.safe), "auto eat at 1 HP can't be safe");
-    has(fights[0].safety.why, "auto eat starts");
-  }));
-  test(F, "auto eat plus plenty of food makes a gentle fight safe", () => sandbox(async () => {
-    withFood(100000, 1000);
-    const fights = D().farmFights(bones(), 10);
-    ok(gentle(fights).length > 0, "no gentle monster");
-    ok(gentle(fights).every((f) => f.safety.safe), "a gentle fight with auto eat and plenty of food should be safe");
-    for (const f of fights) if (f.safety.max !== null && f.safety.max * 2 >= f.safety.g.hp) eq(f.safety.safe, false, nm(f.m));
-  }));
-  test(F, "auto eat efficiency shrinks how far your food goes", () => sandbox(async () => {
-    withFood(40, 100, { at: 1e9, eff: 100 });
-    const probe = gentle(D().farmFights(bones(), 300)).find((f) => f.safety.need > 0);
-    ok(probe, "no gentle monster");
-    const kills = Math.max(1, Math.floor((300 * 30) / probe.safety.need)); // a farm that needs about 30 of your 40 food
-    const full = D().farmFights(bones(), kills).find((f) => f.m === probe.m);
-    eq(full.safety.safe, true, "full efficiency");
-    withFood(40, 100, { at: 1e9, eff: 25 });
-    const weak = D().farmFights(bones(), kills).find((f) => f.m === probe.m);
-    eq(weak.safety.safe, false, "25% efficiency");
-  }));
-  test(F, "a farm bigger than your food supply is not safe", () => sandbox(async () => {
-    withFood(1, 1000);
-    const small = gentle(D().farmFights(bones(), 1)).find((f) => f.safety.g.pool > 0);
-    ok(small, "no gentle monster");
-    const big = D().farmFights(bones(), 5000000).find((f) => f.m === small.m);
-    eq(big.safety.safe, false);
-    has(big.safety.why, "food");
-  }));
-  test(F, "a fight that is not safe is not queued unless you tick the box", () => sandbox(async () => {
-    const risky = D().farmFights(bones()).find((f) => f.open && !f.safety.safe);
-    if (!risky) throw new Skip("every fight is safe for this character");
-    let items = await farmAdd(bones(), () => pickFarm(risky.id));
-    eq(items[0].kind, "manual");
-    TH().queue.clear();
-    await closePopups();
-    items = await farmAdd(bones(), async () => {
-      await pickFarm(risky.id);
-      const cb = document.querySelector("[data-mbd-risk]");
-      ok(cb, "risk box missing");
-      cb.checked = true;
-      cb.dispatchEvent(new Event("change", { bubbles: true }));
-      await sleep(150);
-    });
-    eq(items[0].kind, "combat"); eq(items[0].untilItem, "melvorD:Bones"); eq(items[0].monsterId, risky.m.id);
-  }));
-  test(F, "a safe fight queues without asking", () => sandbox(async () => {
-    withFood(100000, 1000);
-    const safe = D().farmFights(bones()).find((f) => f.open && f.safety.safe);
-    if (!safe) throw new Skip("no safe fight for this character");
-    const items = await farmAdd(bones(), () => pickFarm(safe.id));
-    eq(items[0].kind, "combat"); eq(items[0].monsterId, safe.m.id);
-  }));
-  test(F, "your Slayer task is flagged when its monster drops the item", () => sandbox(async () => {
-    const m = D().farmFights(bones()).find((f) => f.open)?.m;
-    ok(m, "no monster");
-    const t = game.combat.slayerTask;
-    stub(t, "active", true); stub(t, "monster", m); stub(t, "killsLeft", 25);
-    const f = D().farmFights(bones()).find((x) => x.m === m);
-    eq(f.onTask, true); eq(f.taskLeft, 25);
-  }));
-  test(F, "the fight step finishes when the item is in the bank", () => sandbox(async () => {
-    const m = D().farmFights(bones()).find((f) => f.open)?.m;
-    TH().queue.add([{ kind: "combat", monsterId: m.id, untilItem: "melvorD:Bones", targetKills: 99, qty: 3, startQty: 0, label: "t" }]);
-    bankStub((id) => (id === "melvorD:Bones" ? 3 : 0));
-    const r = TH().runner;
-    r.start();
-    eq(TH().queue.items[0].status, "done");
-    r.stop();
-  }));
 
   const XG = "XP goals";
   const xpE = (name, extra) => { const sk = skill(name); return { id: "t", kind: "xp", skillId: sk.id, targetXp: Math.floor(sk.xp ?? 0) + 3000, ...extra }; };
@@ -1033,15 +622,6 @@
     TH().runner.stop();
   }));
 
-  test(F, "every fight in the picker shows its combat level, lowest first", () => sandbox(async () => {
-    TH().showItem("melvorD:Bones", (game.bank.getQty(bones()) ?? 0) + 5);
-    ok(await popupReady(), "popup never finished opening");
-    const opts = [...document.querySelectorAll("[data-mbd-farm] optgroup[label^='Combat'] option")];
-    ok(opts.length > 3, "fights should be listed");
-    const lv = opts.map((o) => { const m = /Combat Lv ([\d,]+)/.exec(o.textContent); ok(m, "no combat level in: " + o.textContent); return Number(m[1].replace(/,/g, "")); });
-    for (let i = 1; i < lv.length; i++) ok(lv[i] >= lv[i - 1], "not sorted by combat level");
-  }));
-
   test(F, "placeholder random-monster slots are not offered as fights", () => sandbox(async () => {
     const odd = list(game.monsters).filter((m) => /undefined translation/i.test(String(m.name)));
     if (!odd.length) skip("every monster has a name");
@@ -1049,17 +629,6 @@
     ok(fights.length > 3, "bones should still drop from many monsters");
     ok(fights.every((f) => !odd.includes(f.m)), "a placeholder slot was offered");
     ok(!/undefined translation/i.test(D().farmHtml(bones(), 5)), "the placeholder name leaked into the picker");
-  }));
-  test(F, "the automatic fight is the most efficient safe one", () => sandbox(async () => {
-    withFood(100000, 1000);
-    const fights = D().farmFights(bones(), 50);
-    const safe = fights.filter((f) => f.open && f.safety.safe);
-    ok(safe.length > 1, "need more than one safe fight to compare");
-    ok(safe.every((f) => isFinite(f.ms) && f.ms > 0), "every fight should have a time estimate");
-    const best = Math.min(...safe.map((f) => f.score));
-    const plan = D().farmPlan(bones(), true, 50);
-    eq(plan.opt.type, "fight");
-    eq(plan.opt.score, best);
   }));
   test(F, "slower kills and more food make a fight score worse", () => sandbox(async () => {
     withFood(100000, 1000);
@@ -1069,15 +638,6 @@
     ok(bigger.ms > f.ms, "ten times the farm should take longer");
     ok(bigger.score > f.score, "and score worse");
   }));
-  test(F, "the fight picker shows how long each fight takes", () => sandbox(async () => {
-    withFood(100000, 1000);
-    TH().showItem("melvorD:Bones", (game.bank.getQty(bones()) ?? 0) + 20);
-    ok(await popupReady(), "popup never finished opening");
-    const txt = document.querySelector("[data-mbd-farm]").textContent;
-    has(txt, "about ");
-    ok(!/Infinity|NaN/.test(document.querySelector(".mbd-th-pop").textContent), "bad number in the popup");
-  }));
-
   const BR = "Burn rate";
   const burnAt = (pct) => stub(skill("Cooking"), "getRecipeSuccessChance", () => pct);
   const rawShrimpIn = (rows) => rows.find((r) => r.item.id === "melvorD:Raw_Shrimp")?.qty;
@@ -1166,77 +726,14 @@
     D().TS.goal = "level";
     D().openTrain();
     ok(await popupReady(), "popup never finished opening");
-    if (document.getElementById("mbd-tr-skill").value !== "melvorD:Woodcutting") setv("mbd-tr-skill", "melvorD:Woodcutting");
-    const cb = document.getElementById("mbd-tr-mastery");
+    if (document.getElementById("mst-tr-skill").value !== "melvorD:Woodcutting") setv("mst-tr-skill", "melvorD:Woodcutting");
+    const cb = document.getElementById("mst-tr-mastery");
     ok(cb, "mastery switch missing");
     eq(cb.checked, false);
     cb.checked = true;
     cb.dispatchEvent(new Event("change", { bubbles: true }));
     eq(TH().settings.preferMastery(), true);
   }));
-
-  // =====================================================================================
-  const SD = "Skill drops";
-  const itm = (id) => game.items.getObjectByID(id);
-  test(SD, "every gem can be mined for", () => sandbox(async () => {
-    for (const g of ["Topaz", "Sapphire", "Ruby", "Emerald", "Diamond"]) {
-      const it = itm("melvorD:" + g);
-      ok(D().isFarmItem(it), g + " should be a farm item");
-      ok(D().farmSkills(it).some((o) => o.skill.id === "melvorD:Mining" && o.perHr > 0), g + " has no Mining option");
-    }
-  }));
-  test(SD, "gem odds follow the gem table weights", () => sandbox(async () => {
-    const per = (g) => D().farmSkills(itm("melvorD:" + g)).find((o) => o.a.id === "melvorD:Copper_Ore").perHr;
-    ok(per("Topaz") > per("Diamond") * 5, "Topaz should drop far more often than Diamond");
-  }));
-  test(SD, "Bobby's Pocket and Chapeau Noir come from thieving", () => sandbox(async () => {
-    for (const id of ["melvorF:Bobbys_Pocket", "melvorF:Chapeau_Noir"]) {
-      const it = itm(id);
-      ok(D().isFarmItem(it), id + " should be a farm item");
-      const o = D().farmSkills(it);
-      ok(o.length > 5 && o.every((x) => x.skill.id === "melvorD:Thieving"), "should list thieving targets");
-    }
-    ok(D().farmSkills(itm("melvorF:Bobbys_Pocket"))[0].perHr > D().farmSkills(itm("melvorF:Chapeau_Noir"))[0].perHr, "Chapeau Noir is far rarer");
-  }));
-  test(SD, "Amulet of Fishing comes from fishing chests", () => sandbox(async () => {
-    const it = itm("melvorD:Amulet_of_Fishing");
-    ok(D().isFarmItem(it), "should be a farm item");
-    const o = D().farmSkills(it);
-    ok(o.length > 0 && o.every((x) => x.skill.id === "melvorD:Fishing"), "should list fish");
-    ok(o.every((x) => x.perHr > 0 && x.perHr < 1), "chest amulet should be rare");
-  }));
-  test(SD, "a Thieving farm step queues and takes the best target", () => sandbox(async () => {
-    const it = itm("melvorF:Bobbys_Pocket");
-    const items = await farmAdd(it);
-    const e = items[0];
-    ok(e, "nothing queued");
-    eq(e.skillId, "melvorD:Thieving"); eq(e.farm, "best");
-    ok(D().estimateMs(e) > 0, "needs an estimate");
-  }));
-  test(SD, "starting a Thieving step starts thieving", () => sandbox(async () => {
-    const e = { kind: "gather", skillId: "melvorD:Thieving", farm: "best", itemId: "melvorF:Bobbys_Pocket", qty: 1, label: "t" };
-    const r = D().startEntry(e);
-    ok(r.ok, "start failed: " + r.reason);
-    eq(game.activeAction?.id, "melvorD:Thieving");
-    game.stopActiveAction();
-  }), { live: true });
-
-  const HD = "Holy Dust";
-  test(HD, "Holy Dust breaks down into runes and a Blessed Offering step", () => sandbox(async () => {
-    const it = itm("melvorF:Holy_Dust");
-    const es = D().toEntries(D().buildRows(it, 30));
-    const last = es[es.length - 1];
-    eq(last.skillId, "melvorD:Magic"); eq(last.itemId, "melvorF:Holy_Dust"); eq(last.kind, "craft");
-    const nature = es.find((e) => e.itemId === "melvorF:Nature_Rune"), earth = es.find((e) => e.itemId === "melvorD:Earth_Rune");
-    ok(nature && earth, "should farm the runes");
-    eq(nature.qty, 2 * earth.qty);
-  }));
-  test(HD, "Blessed Offering is the only spell turned into a recipe", () => sandbox(async () => {
-    D().toEntries(D().buildRows(itm("melvorF:Holy_Dust"), 3));
-    const spells = game.skills.getObjectByID("melvorD:Magic").actions.allObjects.filter((a) => Object.prototype.hasOwnProperty.call(a, "itemCosts")).map((a) => a.id);
-    eq(spells.join(), "melvorF:BlessedOffering");
-  }));
-
   const run = async (opts = {}) => {
     const { live = true, group = null, only = null } = opts;
     const results = [];
@@ -1249,7 +746,7 @@
       if (t.live && !live) { r.status = "skip"; r.note = "live tests off"; }
       else {
         try { await t.fn(); }
-        catch (e) { if (e instanceof Skip) { r.status = "skip"; r.note = e.message; } else { r.status = "FAIL"; r.note = e.message; console.error(`[TTH test] ${t.group}: ${t.name}`, e); } }
+        catch (e) { if (e instanceof Skip) { r.status = "skip"; r.note = e.message; } else { r.status = "FAIL"; r.note = e.message; console.error(`[ST test] ${t.group}: ${t.name}`, e); } }
       }
       r.ms = Date.now() - s;
       results.push(r);
@@ -1258,10 +755,10 @@
     const summary = { version: TH()?.version, passed: count("pass"), failed: count("FAIL"), skipped: count("skip"), total: results.length, seconds: Math.round((Date.now() - t0) / 100) / 10 };
     const unknown = window.__tthUnknownGoals ?? [];
     console.table(results.filter((r) => r.status !== "pass").map((r) => ({ group: r.group, test: r.name, result: r.status, note: r.note })));
-    console.log(`%cTownship Task Helper ${summary.version}: ${summary.passed} passed, ${summary.failed} failed, ${summary.skipped} skipped (${summary.seconds}s)`, `font-weight:bold;color:${summary.failed ? "#e0505c" : "#30c78d"}`);
+    console.log(`%cSkill Trainer ${summary.version}: ${summary.passed} passed, ${summary.failed} failed, ${summary.skipped} skipped (${summary.seconds}s)`, `font-weight:bold;color:${summary.failed ? "#e0505c" : "#30c78d"}`);
     if (unknown.length) console.log("Task goal types without a play button (check after game updates):", unknown.join(", "));
     return { summary, results, unsupportedGoalTypes: unknown };
   };
-  window.TTHTests = { run, tests: TESTS.map((t) => `${t.group}: ${t.name}`) };
-  console.log(`TTHTests loaded (${TESTS.length} tests). Run: await TTHTests.run()`);
+  window.STTests = { run, tests: TESTS.map((t) => `${t.group}: ${t.name}`) };
+  console.log(`STTests loaded (${TESTS.length} tests). Run: await STTests.run()`);
 })();

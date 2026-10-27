@@ -1,4 +1,4 @@
 {
-  "namespace": "townshipHelper",
+  "namespace": "skillTrainer",
   "setup": "setup.mjs"
 }

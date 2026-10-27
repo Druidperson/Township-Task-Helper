@@ -1,10 +1,10 @@
-// Township Task Helper: task breakdowns + action queue for Melvor Idle
+// Skill Trainer: train a skill or make an item, with the queue planning and running the work
 export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.14.1";
-  const LOG = (...a) => console.log("[Township Task Helper]", ...a);
+  const VERSION = "1.0.0";
+  const LOG = (...a) => console.log("[Skill Trainer]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => {
     const n = String(o?.name ?? o?._name ?? o?._localID ?? o?.id ?? "?");
@@ -24,7 +24,7 @@ export function setup(ctx) {
   // ---------- settings ----------
   // As a Melvor mod, the switch lives in the mod settings menu (ctx.settings). It is also on the queue panel,
   // and falls back to localStorage if the settings API isn't there (userscript use).
-  const KEYS = { autoStart: ["mbd-th-autostart", false], autoSell: ["mbd-th-autosell", true], preferMastery: ["mbd-th-mastery", false] };
+  const KEYS = { autoStart: ["mst-th-autostart", false], autoSell: ["mst-th-autosell", true], preferMastery: ["mst-th-mastery", false] };
   const Settings = {
     api: null,
     get(name) {
@@ -33,7 +33,7 @@ export function setup(ctx) {
       return KEYS[name][1];
     },
     set(name, v) {
-      try { if (this.api) this.api.set(name, !!v); } catch (e) { console.warn("[Township Task Helper] settings", e); }
+      try { if (this.api) this.api.set(name, !!v); } catch (e) { console.warn("[Skill Trainer] settings", e); }
       try { localStorage.setItem(KEYS[name][0], v ? "1" : "0"); } catch (e) { /* ignore */ }
     },
     autoStart() { return this.get("autoStart"); },
@@ -47,8 +47,8 @@ export function setup(ctx) {
       section.add({
         type: "switch",
         name: "autoStart",
-        label: "Automatically start the Action Queue when adding a task",
-        hint: "When on, adding a task to the queue starts the queue right away. When off, you press Start yourself.",
+        label: "Automatically start the queue when adding a training goal",
+        hint: "When on, adding a training goal to the queue starts the queue right away. When off, you press Start yourself.",
         default: false,
       });
       section.add({
@@ -66,7 +66,7 @@ export function setup(ctx) {
         default: true,
       });
       Settings.api = section;
-    } catch (e) { console.warn("[Township Task Helper] could not register settings", e); }
+    } catch (e) { console.warn("[Skill Trainer] could not register settings", e); }
   }
   const itemById = (id) => { try { return game.items.getObjectByID(id); } catch (e) { return null; } };
   const skillById = (id) => list(game.skills).find((s) => s.id === id);
@@ -145,7 +145,7 @@ export function setup(ctx) {
       for (const p of list(game.shop?.purchases)) {
         for (const c of p.contains?.items ?? []) if (c?.item) push(idx.shop, c.item.id, p);
       }
-    } catch (e) { console.warn("[Township Task Helper] shop index failed", e); }
+    } catch (e) { console.warn("[Skill Trainer] shop index failed", e); }
     return idx;
   };
 
@@ -185,7 +185,7 @@ export function setup(ctx) {
   };
 
   const num = (n) => Number(n).toLocaleString();
-  const chip = (html, cls = "", title = "") => `<span class="mbd-chip ${cls}"${title ? ` title="${esc(title)}"` : ""}><span>${html}</span></span>`;
+  const chip = (html, cls = "", title = "") => `<span class="mst-chip ${cls}"${title ? ` title="${esc(title)}"` : ""}><span>${html}</span></span>`;
   const where = (x) => `${esc(nm(x.skill))}: ${esc(nm(x.a))} (Lv ${x.a.level ?? 1})`;
   const shopCost = (p) => {
     const cur = (p.costs?.currencies ?? []).map((c) => `${Number(c.cost ?? c.quantity ?? 0).toLocaleString()} ${esc(nm(c.currency))}`);
@@ -207,15 +207,15 @@ export function setup(ctx) {
     return parts;
   };
   const wikiUrl = (id) => `https://wiki.melvoridle.com/index.php?search=${encodeURIComponent(nm(itemById(id)))}`;
-  const wikiChip = (id) => chip(`<a data-mbd-wiki href="${esc(wikiUrl(id))}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline"><i class="fa fa-book mr-1"></i>Look it up on the Melvor wiki</a>`);
+  const wikiChip = (id) => chip(`<a data-mst-wiki href="${esc(wikiUrl(id))}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline"><i class="fa fa-book mr-1"></i>Look it up on the Melvor wiki</a>`);
   const sourceText = (id) => {
     const parts = sourceParts(id);
     return parts.length ? parts.map((p) => `${p.label}: ${p.items.join("; ")}`).join(" | ") : `no source found in the game data (chest, event or other). Try the wiki: ${wikiUrl(id)}`;
   };
   const sourceHtml = (id) => {
     const parts = sourceParts(id);
-    if (!parts.length) return `<div class="mbd-chips">${chip("No source found in the game data (chest, event or other)", "warn")}</div><div class="mbd-chips">${wikiChip(id)}</div>`;
-    return parts.map((p) => `<div class="mbd-chips">${chip(`<i class="fa ${p.fa}"></i> <b>${p.label}</b>`, "lbl")}${p.items.map((i) => chip(i)).join("")}</div>`).join("");
+    if (!parts.length) return `<div class="mst-chips">${chip("No source found in the game data (chest, event or other)", "warn")}</div><div class="mst-chips">${wikiChip(id)}</div>`;
+    return parts.map((p) => `<div class="mst-chips">${chip(`<i class="fa ${p.fa}"></i> <b>${p.label}</b>`, "lbl")}${p.items.map((i) => chip(i)).join("")}</div>`).join("");
   };
 
   // ---------- Astrology: Stardust and Golden Stardust are random drops from studying a constellation ----------
@@ -247,17 +247,17 @@ export function setup(ctx) {
     const sk = astroSkill(), opts = astroOptions(item), best = bestCon(item), cur = conChoice(item);
     if (!opts.length || !best || !cur) return sourceHtml(item.id);
     const label = (o) => `${nm(o.c)} · ${astroBoosts(o.c).slice(0, 3).join(", ")}${astroBoosts(o.c).length > 3 ? "..." : ""} · ${num(Math.round(o.xpHr))} XP/h`;
-    const sel = `<select data-mbd-astro class="custom-select custom-select-sm" style="max-width:100%;width:auto">` +
+    const sel = `<select data-mst-astro class="custom-select custom-select-sm" style="max-width:100%;width:auto">` +
       `<option value="best"${Astro.pick === "best" ? " selected" : ""}>Best XP/hour: ${esc(nm(best.c))} (${num(Math.round(best.xpHr))} XP/h)</option>` +
       opts.map((o) => `<option value="${esc(o.c.id)}"${Astro.pick === o.c.id ? " selected" : ""}${o.open ? "" : " disabled"}>${esc(label(o))}${o.open ? "" : ` (needs level ${o.level})`}</option>`).join("") + `</select>`;
     const hrs = qty / Math.max(1e-9, cur.perHr);
     const mastery = (() => { try { return sk.getMasteryLevel(cur.c); } catch (e) { return null; } })();
-    return `<div class="mbd-chips">${chip(`<i class="fa fa-star"></i> <b>Astrology</b>`, "lbl")}${chip("Random drop while studying a constellation")}</div>` +
-      `<div class="mbd-row"><div class="mbd-rowlbl">Which constellation?</div><div class="mbd-chips">${sel}</div></div>` +
-      `<div class="mbd-chips">${chip(`${esc(nm(cur.c))}`)}${chip(`${num(Math.round(cur.xpHr))} XP/hour`)}${mastery !== null ? chip(`Mastery ${mastery}`) : ""}` +
+    return `<div class="mst-chips">${chip(`<i class="fa fa-star"></i> <b>Astrology</b>`, "lbl")}${chip("Random drop while studying a constellation")}</div>` +
+      `<div class="mst-row"><div class="mst-rowlbl">Which constellation?</div><div class="mst-chips">${sel}</div></div>` +
+      `<div class="mst-chips">${chip(`${esc(nm(cur.c))}`)}${chip(`${num(Math.round(cur.xpHr))} XP/hour`)}${mastery !== null ? chip(`Mastery ${mastery}`) : ""}` +
       `${chip(`About ${fmtDur(hrs * 3600000)}`, "ok", "Average, at base speed")}</div>` +
-      `<div class="mbd-chips">${chip(`Boosts ${esc(astroBoosts(cur.c).join(", "))}`)}</div>` +
-      `<div class="mbd-note">Studying also levels the constellation's mastery. Pick one to train it on purpose, or take the best XP/hour and the queue switches to a better one when you level up.</div>`;
+      `<div class="mst-chips">${chip(`Boosts ${esc(astroBoosts(cur.c).join(", "))}`)}</div>` +
+      `<div class="mst-note">Studying also levels the constellation's mastery. Pick one to train it on purpose, or take the best XP/hour and the queue switches to a better one when you level up.</div>`;
   };
 
   // ---------- Farming an item that only drops ----------
@@ -409,26 +409,26 @@ export function setup(ctx) {
       : `Fight ${nm(x.m)} (Combat Lv ${num(x.m.combatLevel ?? 0)}) · ${x.perKill >= 1 ? "drops every kill" : `about 1 in ${num(Math.round(1 / x.perKill))} kills`} · ${isFinite(x.ms) ? "about " + fmtDur(x.ms) : "time unknown"} · ${x.safety.safe ? "safe" : "risky"}${x.onTask ? " · your Slayer task" : ""}${x.open ? "" : " (area locked)"}`;
     const cur = farmPick(item);
     const autoTxt = !auto ? "nothing you can do yet" : auto.type === "skill" ? `${nm(auto.skill)}, ${nm(auto.a)} (best XP/hour)` : `fight ${nm(auto.m)}${auto.safety.safe ? " (most efficient safe fight)" : " (risky)"}`;
-    const sel = `<select data-mbd-farm="${esc(item.id)}" class="custom-select custom-select-sm" style="max-width:100%;width:auto">` +
+    const sel = `<select data-mst-farm="${esc(item.id)}" class="custom-select custom-select-sm" style="max-width:100%;width:auto">` +
       `<option value="best"${cur === "best" ? " selected" : ""}>Automatic: ${esc(autoTxt)}</option>` +
       (skills.length ? `<optgroup label="Skilling">${skills.map((x) => `<option value="${esc(x.id)}"${cur === x.id ? " selected" : ""}${x.open ? "" : " disabled"}>${esc(label(x))}</option>`).join("")}</optgroup>` : "") +
       (fights.length ? `<optgroup label="Combat, lowest level first">${[...fights].sort((p, q) => (p.m.combatLevel ?? 0) - (q.m.combatLevel ?? 0)).map((x) => `<option value="${esc(x.id)}"${cur === x.id ? " selected" : ""}${x.open ? "" : " disabled"}>${esc(label(x))}</option>`).join("")}</optgroup>` : "") + `</select>`;
-    let html = `<div class="mbd-chips">${chip(`<i class="fa fa-dice"></i> <b>Random drop</b>`, "lbl")}${chip("Farm it while you train, or by fighting")}</div>` +
-      `<div class="mbd-row"><div class="mbd-rowlbl">How do you want to get it?</div><div class="mbd-chips">${sel}</div></div>`;
+    let html = `<div class="mst-chips">${chip(`<i class="fa fa-dice"></i> <b>Random drop</b>`, "lbl")}${chip("Farm it while you train, or by fighting")}</div>` +
+      `<div class="mst-row"><div class="mst-rowlbl">How do you want to get it?</div><div class="mst-chips">${sel}</div></div>`;
     if (o && o.type === "skill") {
-      html += `<div class="mbd-chips">${chip(`${icon(o.skill)}${esc(nm(o.skill))}`)}${chip(esc(nm(o.a)))}${chip(`${num(Math.round(o.xpHr))} XP/hour`)}${chip(`About ${fmtDur((qty / o.perHr) * 3600000)}`, "ok", "Average, at base speed")}</div>` +
-        `<div class="mbd-note">You train ${esc(nm(o.skill))} while it drops. ${plan.auto ? "The queue moves to a better method when you level up." : ""}</div>`;
+      html += `<div class="mst-chips">${chip(`${icon(o.skill)}${esc(nm(o.skill))}`)}${chip(esc(nm(o.a)))}${chip(`${num(Math.round(o.xpHr))} XP/hour`)}${chip(`About ${fmtDur((qty / o.perHr) * 3600000)}`, "ok", "Average, at base speed")}</div>` +
+        `<div class="mst-note">You train ${esc(nm(o.skill))} while it drops. ${plan.auto ? "The queue moves to a better method when you level up." : ""}</div>`;
     } else if (o) {
       const kills = Math.ceil(qty / o.perKill);
-      html += `<div class="mbd-chips">${chip(`${esc(nm(o.m))}`)}${chip(`Combat Lv ${num(o.m.combatLevel ?? 0)}`)}${chip(`About ${num(kills)} kills`, "ok", "Average drop rate")}${isFinite(o.ms) ? chip(`About ${fmtDur(o.ms)}`, "ok", "Kill time plus the pause between monsters, using your damage and an average drop rate") : ""}${o.food != null ? chip(`About ${num(o.food)} food`, "", "Food auto eat is expected to use") : ""}${chip(o.safety.safe ? "Safe for you" : "Risky for you", o.safety.safe ? "ok" : "warn", esc(o.safety.why))}</div>` +
-        `<div class="mbd-note">${esc(cap(o.safety.why))}.${o.safety.safe ? "" : " Special attacks can hit harder than this."}</div>`;
-      if (o.onTask) html += `<div class="mbd-chips">${chip(`<i class="fa fa-skull"></i> Your Slayer task: ${num(o.taskLeft)} left`, "ok", "These kills count toward it")}</div>`;
-      if (!o.safety.safe) html += `<label class="mbd-note" style="display:block"><input type="checkbox" data-mbd-risk="${esc(item.id)}"${Farm.risk[item.id] ? " checked" : ""}> I understand the risk, queue this fight anyway</label>`;
-    } else html += `<div class="mbd-note">Nothing you can do yet gives this item. ${lvlWarn(item.id)}</div>`;
+      html += `<div class="mst-chips">${chip(`${esc(nm(o.m))}`)}${chip(`Combat Lv ${num(o.m.combatLevel ?? 0)}`)}${chip(`About ${num(kills)} kills`, "ok", "Average drop rate")}${isFinite(o.ms) ? chip(`About ${fmtDur(o.ms)}`, "ok", "Kill time plus the pause between monsters, using your damage and an average drop rate") : ""}${o.food != null ? chip(`About ${num(o.food)} food`, "", "Food auto eat is expected to use") : ""}${chip(o.safety.safe ? "Safe for you" : "Risky for you", o.safety.safe ? "ok" : "warn", esc(o.safety.why))}</div>` +
+        `<div class="mst-note">${esc(cap(o.safety.why))}.${o.safety.safe ? "" : " Special attacks can hit harder than this."}</div>`;
+      if (o.onTask) html += `<div class="mst-chips">${chip(`<i class="fa fa-skull"></i> Your Slayer task: ${num(o.taskLeft)} left`, "ok", "These kills count toward it")}</div>`;
+      if (!o.safety.safe) html += `<label class="mst-note" style="display:block"><input type="checkbox" data-mst-risk="${esc(item.id)}"${Farm.risk[item.id] ? " checked" : ""}> I understand the risk, queue this fight anyway</label>`;
+    } else html += `<div class="mst-note">Nothing you can do yet gives this item. ${lvlWarn(item.id)}</div>`;
     const task = slayerTaskNow();
     if (task && (!o || o.type !== "fight" || !o.onTask)) {
       const f = fights.find((x) => x.onTask);
-      if (f) html += `<div class="mbd-chips">${chip(`<i class="fa fa-skull"></i> Your Slayer task (${esc(nm(f.m))}) drops this, pick it from the list to count both`, "", "")}</div>`;
+      if (f) html += `<div class="mst-chips">${chip(`<i class="fa fa-skull"></i> Your Slayer task (${esc(nm(f.m))}) drops this, pick it from the list to count both`, "", "")}</div>`;
     }
     return html;
   };
@@ -444,7 +444,7 @@ export function setup(ctx) {
     const opts = [...(idx.gatherers.get(id) ?? []), ...(idx.randoms.get(id) ?? [])];
     if (!opts.length || opts.some((x) => (x.a.level ?? 1) <= x.skill.level)) return "";
     const best = opts.reduce((m, x) => ((x.a.level ?? 1) - x.skill.level < (m.a.level ?? 1) - m.skill.level ? x : m));
-    return `<div class="mbd-chips">${lvlChip(best.skill, best.a)}</div>`;
+    return `<div class="mst-chips">${lvlChip(best.skill, best.a)}</div>`;
   };
   const buyHtml = (id, need) => {
     buildIndex();
@@ -462,9 +462,9 @@ export function setup(ctx) {
       for (const c of p.costs.items ?? []) parts.push(`${num(c.quantity * n)} ${esc(nm(c.item))}`);
       const ok = game.shop.getPurchaseCosts(p, n).checkIfOwned() && game.checkRequirements(p.purchaseRequirements);
       const label = `<i class="fa fa-shopping-cart mr-1"></i>Buy ${num(n * per)} ${esc(nm(itemById(id)))} for ${parts.join(" + ")}`;
-      return `<div class="mbd-chips"><button type="button" class="btn btn-sm ${ok ? "btn-success" : "btn-outline-secondary"}" data-mbd-buy="${esc(p.id)}" data-n="${n}"${ok ? "" : " disabled"}>${label}</button></div>` +
-        (ok ? "" : `<div class="mbd-chips">${chip("You can't afford this yet, or it's locked", "warn")}</div>`);
-    } catch (e) { console.warn("[Township Task Helper] shop button", e); return ""; }
+      return `<div class="mst-chips"><button type="button" class="btn btn-sm ${ok ? "btn-success" : "btn-outline-secondary"}" data-mst-buy="${esc(p.id)}" data-n="${n}"${ok ? "" : " disabled"}>${label}</button></div>` +
+        (ok ? "" : `<div class="mst-chips">${chip("You can't afford this yet, or it's locked", "warn")}</div>`);
+    } catch (e) { console.warn("[Skill Trainer] shop button", e); return ""; }
   };
 
   const reqText = (r) => {
@@ -504,9 +504,9 @@ export function setup(ctx) {
     return out.filter((x) => { const k = x.text + "|" + x.forName; if (seen.has(k)) return false; seen.add(k); return true; });
   };
   const missingHtml = (miss) =>
-    `<div class="mbd-step">` +
-    miss.map((x) => `<div class="mbd-chips">${chip(`<i class="fa fa-exclamation-triangle"></i>&nbsp;Warning: ${esc(x.text)} required for ${esc(x.forName)}`, "warn")}</div>`).join("") +
-    `<div class="mbd-note">You can't queue this until you meet the requirements.</div></div>`;
+    `<div class="mst-step">` +
+    miss.map((x) => `<div class="mst-chips">${chip(`<i class="fa fa-exclamation-triangle"></i>&nbsp;Warning: ${esc(x.text)} required for ${esc(x.forName)}`, "warn")}</div>`).join("") +
+    `<div class="mst-note">You can't queue this until you meet the requirements.</div></div>`;
 
   const buildRows = (item, qty, fresh = false) => {
     buildIndex();
@@ -542,7 +542,7 @@ export function setup(ctx) {
 
   const itemSection = (item, qty, fresh = false) => {
     const rows = buildRows(item, qty, fresh);
-    if (!rows.length) return `<div class="mbd-step"><div class="mbd-chips">${chip(`<i class="fa fa-check"></i> You already have enough in your bank`, "ok")}</div></div>`;
+    if (!rows.length) return `<div class="mst-step"><div class="mst-chips">${chip(`<i class="fa fa-check"></i> You already have enough in your bank`, "ok")}</div></div>`;
     return rows.map((n, i) => {
       const owned = have(n.item);
       const haveChip = owned === null || n.fresh ? "" : chip(`You have ${num(owned)}${n.need !== undefined ? ` of ${num(n.need)} needed` : ""}`);
@@ -553,14 +553,14 @@ export function setup(ctx) {
         const alts = (idx.crafters.get(n.item.id)?.length ?? 1) - 1 + options(c.a).length - 1;
         title = `${icon(c.skill)}<b>${esc(nm(c.skill))}</b>: make ${icon(n.item)}<b>${esc(nm(n.item))}</b> &times;${num(n.qty)}`;
         chips =
-          `<div class="mbd-chips">${chip(`Level ${c.a.level ?? 1}`)}${chip(`${num(crafts)} craft${crafts === 1 ? "" : "s"}`)}${haveChip}${alts > 0 ? chip(`${alts} other option${alts === 1 ? "" : "s"}`) : ""}</div>` +
-          (uses.length ? `<div class="mbd-chips">${chip("<b>Uses</b>", "lbl")}${uses.join("")}</div>` : "") +
-          (lvlChip(c.skill, c.a) ? `<div class="mbd-chips">${lvlChip(c.skill, c.a)}</div>` : "");
+          `<div class="mst-chips">${chip(`Level ${c.a.level ?? 1}`)}${chip(`${num(crafts)} craft${crafts === 1 ? "" : "s"}`)}${haveChip}${alts > 0 ? chip(`${alts} other option${alts === 1 ? "" : "s"}`) : ""}</div>` +
+          (uses.length ? `<div class="mst-chips">${chip("<b>Uses</b>", "lbl")}${uses.join("")}</div>` : "") +
+          (lvlChip(c.skill, c.a) ? `<div class="mst-chips">${lvlChip(c.skill, c.a)}</div>` : "");
       } else {
         title = `${icon(n.item)}<b>${esc(nm(n.item))}</b> &times;${num(n.qty)}`;
-        chips = `<div class="mbd-chips">${haveChip}</div>` + (isAstroItem(n.item) ? astroHtml(n.item, n.qty) : isFarmItem(n.item) ? farmHtml(n.item, n.qty) + buyHtml(n.item.id, n.qty) : sourceHtml(n.item.id) + buyHtml(n.item.id, n.qty) + lvlWarn(n.item.id));
+        chips = `<div class="mst-chips">${haveChip}</div>` + (isAstroItem(n.item) ? astroHtml(n.item, n.qty) : isFarmItem(n.item) ? farmHtml(n.item, n.qty) + buyHtml(n.item.id, n.qty) : sourceHtml(n.item.id) + buyHtml(n.item.id, n.qty) + lvlWarn(n.item.id));
       }
-      return `<div class="mbd-step"><div class="mbd-stepno">Step ${i + 1}</div><div class="mbd-title">${title}</div>${chips}</div>`;
+      return `<div class="mst-step"><div class="mst-stepno">Step ${i + 1}</div><div class="mst-title">${title}</div>${chips}</div>`;
     }).join("");
   };
 
@@ -599,7 +599,7 @@ export function setup(ctx) {
     const sk = skillById(ATTACK_ICON[t]);
     return chip(`${sk ? icon(sk) : ""}${esc(cap(t))}${extra}`, cls, title);
   };
-  const row = (label, chips) => (chips.length ? `<div class="mbd-row"><div class="mbd-rowlbl">${label}</div><div class="mbd-chips">${chips.join("")}</div></div>` : "");
+  const row = (label, chips) => (chips.length ? `<div class="mst-row"><div class="mst-rowlbl">${label}</div><div class="mst-chips">${chips.join("")}</div></div>` : "");
   const combatSection = (m) => {
     const styles = m.attackType === "random" ? ["melee", "ranged", "magic"] : m.attackType ? [m.attackType] : [];
     const attacks = styles.map((t) => styleChip(t));
@@ -620,7 +620,7 @@ export function setup(ctx) {
     const defence = ["melee", "ranged", "magic"].map((k) => styleChip(k, lowStyles.has(k) ? "ok" : "", `${cap(k)} defence bonus`, ` <small>${def[k] > 0 ? "+" : ""}${num(def[k])}</small>`));
     const resist = (m.equipmentStats ?? []).filter((x) => x.key === "resistance" && x.value).map((x) =>
       chip(`${x.damageType && typeof x.damageType.media === "string" ? icon(x.damageType) : ""}${esc(nm(x.damageType))} <small>${num(x.value)}%</small>`, "", x.value > 0 ? "Damage reduction" : "Takes extra damage"));
-    return `<div class="mbd-step"><div class="mbd-stepno">Combat</div>` +
+    return `<div class="mst-step"><div class="mst-stepno">Combat</div>` +
       row("Attacks with", attacks) + row("Special attacks", specials) + row("Passives", passives) +
       row("Weak to", weak) + row("Defence bonus", defence) + row("Resists", resist) + `</div>`;
   };
@@ -637,7 +637,7 @@ export function setup(ctx) {
   const switchSet = (i) => {
     const pl = game.combat?.player;
     setMsg = "";
-    try { pl.changeEquipmentSet(i); } catch (e) { console.warn("[Township Task Helper]", e); }
+    try { pl.changeEquipmentSet(i); } catch (e) { console.warn("[Skill Trainer]", e); }
     if (pl && pl.selectedEquipmentSet !== i) setMsg = "Couldn't switch sets right now (you may be in combat, or the set has a restriction).";
   };
   const setsHtml = () => {
@@ -648,18 +648,18 @@ export function setup(ctx) {
     const itemsOf = (st) => (st.equipment?.equippedArray ?? []).filter((x) => !x.isEmpty && x.item);
     const btns = sets.map((st, i) => {
       const names = itemsOf(st).map((x) => nm(x.item)).join(", ") || "Nothing equipped";
-      return `<button type="button" class="btn btn-sm ${i === sel ? "btn-primary" : "btn-outline-secondary"}" data-mbd-set="${i}" title="${esc(names)}">${i === sel ? '<i class="fa fa-check mr-1"></i>' : ""}Set ${i + 1}</button>`;
+      return `<button type="button" class="btn btn-sm ${i === sel ? "btn-primary" : "btn-outline-secondary"}" data-mst-set="${i}" title="${esc(names)}">${i === sel ? '<i class="fa fa-check mr-1"></i>' : ""}Set ${i + 1}</button>`;
     }).join("");
     const worn = itemsOf(sets[sel] ?? sets[0]);
-    return `<div class="mbd-chips">${btns}</div>` +
-      `<div class="mbd-chips">${worn.length ? worn.map((x) => chip(`${icon(x.item)}${esc(nm(x.item))}`, "", nm(x.item))).join("") : chip("Nothing equipped in this set")}</div>` +
-      (setMsg ? `<div class="mbd-chips">${chip(esc(setMsg), "warn")}</div>` : "");
+    return `<div class="mst-chips">${btns}</div>` +
+      `<div class="mst-chips">${worn.length ? worn.map((x) => chip(`${icon(x.item)}${esc(nm(x.item))}`, "", nm(x.item))).join("") : chip("Nothing equipped in this set")}</div>` +
+      (setMsg ? `<div class="mst-chips">${chip(esc(setMsg), "warn")}</div>` : "");
   };
   const gearSection = () => {
     if (!game.combat?.player) return "";
-    return `<div class="mbd-step"><div class="mbd-stepno">Gear</div>` +
-      `<div class="mbd-row"><div class="mbd-rowlbl">Food</div><div class="mbd-chips mbd-food">${foodHtml()}</div></div>` +
-      `<div class="mbd-row"><div class="mbd-rowlbl">Equipment sets (click to switch)</div><div class="mbd-sets">${setsHtml()}</div></div></div>`;
+    return `<div class="mst-step"><div class="mst-stepno">Gear</div>` +
+      `<div class="mst-row"><div class="mst-rowlbl">Food</div><div class="mst-chips mst-food">${foodHtml()}</div></div>` +
+      `<div class="mst-row"><div class="mst-rowlbl">Equipment sets (click to switch)</div><div class="mst-sets">${setsHtml()}</div></div></div>`;
   };
 
   const monsterSection = (m, kills) => {
@@ -668,7 +668,7 @@ export function setup(ctx) {
       for (const a of list(game[key])) {
         if ((a.monsters ?? []).includes(m)) {
           const slv = a.slayerLevelRequired ? ` &middot; Slayer Lv ${a.slayerLevelRequired}` : "";
-          places.push(`<div class="mbd-place">${icon(a)}<b>${label}:</b> ${esc(nm(a))}${slv}</div>`);
+          places.push(`<div class="mst-place">${icon(a)}<b>${label}:</b> ${esc(nm(a))}${slv}</div>`);
         }
       }
     }
@@ -682,15 +682,15 @@ export function setup(ctx) {
     }
     if (m.isBoss) chips.push(chip('<i class="fa fa-skull"></i> Boss', "warn"));
     return (
-      `<div class="mbd-step"><div class="mbd-title" style="font-size:18px">` +
+      `<div class="mst-step"><div class="mst-title" style="font-size:18px">` +
       (typeof m.media === "string" ? `<img src="${esc(m.media)}" style="width:56px;height:56px;object-fit:contain;display:block;margin:0 auto 4px">` : "") +
       `<b>${esc(nm(m))}</b>${kills ? ` &times;${num(kills)}` : ""}</div>` +
-      `<div class="mbd-chips">${chips.join("")}</div></div>` +
+      `<div class="mst-chips">${chips.join("")}</div></div>` +
       combatSection(m) + gearSection() +
-      `<div class="mbd-sec">Location:</div>` +
+      `<div class="mst-sec">Location:</div>` +
       (places.length
-        ? places.slice(0, 8).join("") + (places.length > 8 ? `<div class="mbd-place">+${places.length - 8} more</div>` : "")
-        : `<div class="mbd-place">Not found in any area list (may be event or special content)</div>`)
+        ? places.slice(0, 8).join("") + (places.length > 8 ? `<div class="mst-place">+${places.length - 8} more</div>` : "")
+        : `<div class="mst-place">Not found in any area list (may be event or special content)</div>`)
     );
   };
 
@@ -703,13 +703,13 @@ export function setup(ctx) {
       const old = game.shop.buyQuantity;
       game.shop.buyQuantity = n;
       try { game.shop.buyItemOnClick(p, true); } finally { game.shop.buyQuantity = old; }
-    } catch (e) { console.warn("[Township Task Helper] buy failed", e); }
+    } catch (e) { console.warn("[Skill Trainer] buy failed", e); }
   };
   const fire = (title, body, onQueue, hooks) => {
     const bodyFn = typeof body === "function" ? body : () => body;
     const res = SwalLocale.fire({
       title,
-      html: `<div class="text-center font-size-sm mbd-th-pop">${bodyFn()}</div>`,
+      html: `<div class="text-center font-size-sm mst-th-pop">${bodyFn()}</div>`,
       confirmButtonText: "Close",
       showDenyButton: !!onQueue,
       denyButtonText: '<i class="fa fa-play mr-1"></i>Add to queue',
@@ -718,7 +718,7 @@ export function setup(ctx) {
       // same shape and size as the Close button (btn btn-primary m-1), different colours
       customClass: { confirmButton: "btn btn-primary m-1", denyButton: "btn btn-success m-1", cancelButton: "btn btn-warning m-1" },
       didOpen: (popup) => {
-        try { hooks?.didOpen?.(popup); } catch (e) { console.warn("[Township Task Helper]", e); }
+        try { hooks?.didOpen?.(popup); } catch (e) { console.warn("[Skill Trainer]", e); }
         const acts = popup?.querySelector?.(".swal2-actions");
         if (acts) Object.assign(acts.style, { display: "flex", justifyContent: "center", alignItems: "center", gap: "5px", flexWrap: "nowrap", margin: "1em auto 0" });
         // order: Add to queue, Add to top, Close
@@ -732,23 +732,23 @@ export function setup(ctx) {
           if (sel === ".swal2-confirm") el.style.setProperty("min-width", "84px", "important");
         }
         popup?.addEventListener?.("change", (ev) => {
-          const fs = ev.target?.closest?.("[data-mbd-farm]");
-          const fr = ev.target?.closest?.("[data-mbd-risk]");
+          const fs = ev.target?.closest?.("[data-mst-farm]");
+          const fr = ev.target?.closest?.("[data-mst-risk]");
           if (fs || fr) {
-            if (fs) Farm.pick[fs.dataset.mbdFarm] = fs.value;
-            if (fr) Farm.risk[fr.dataset.mbdRisk] = fr.checked;
-            const pop2 = popup.querySelector(".mbd-th-pop");
+            if (fs) Farm.pick[fs.dataset.mstFarm] = fs.value;
+            if (fr) Farm.risk[fr.dataset.mstRisk] = fr.checked;
+            const pop2 = popup.querySelector(".mst-th-pop");
             if (pop2) pop2.innerHTML = bodyFn();
             return;
           }
-          const s = ev.target?.closest?.("[data-mbd-astro]");
+          const s = ev.target?.closest?.("[data-mst-astro]");
           if (!s) return;
           Astro.pick = s.value;
-          const pop = popup.querySelector(".mbd-th-pop");
+          const pop = popup.querySelector(".mst-th-pop");
           if (pop) pop.innerHTML = bodyFn();
         });
         popup?.addEventListener?.("click", (ev) => {
-          const wk = ev.target.closest?.("[data-mbd-wiki]");
+          const wk = ev.target.closest?.("[data-mst-wiki]");
           if (wk) {
             // always a new tab; never navigate the game's own tab
             ev.preventDefault();
@@ -758,23 +758,23 @@ export function setup(ctx) {
             if (!w) { try { navigator.clipboard.writeText(wk.href); } catch (e) { /* ignore */ } tellPlayer("Your browser blocked the new tab. The wiki link was copied, paste it into a new tab."); }
             return;
           }
-          const bb = ev.target.closest?.("[data-mbd-buy]");
+          const bb = ev.target.closest?.("[data-mst-buy]");
           if (bb) {
             ev.preventDefault();
             ev.stopPropagation();
-            buyFromShop(bb.dataset.mbdBuy, Number(bb.dataset.n));
-            const pop = popup.querySelector(".mbd-th-pop");
+            buyFromShop(bb.dataset.mstBuy, Number(bb.dataset.n));
+            const pop = popup.querySelector(".mst-th-pop");
             if (pop) pop.innerHTML = bodyFn();
             return;
           }
-          const b = ev.target.closest?.("[data-mbd-set]");
+          const b = ev.target.closest?.("[data-mst-set]");
           if (!b) return;
           ev.preventDefault();
           ev.stopPropagation();
-          switchSet(Number(b.dataset.mbdSet));
-          const box = popup.querySelector(".mbd-sets");
+          switchSet(Number(b.dataset.mstSet));
+          const box = popup.querySelector(".mst-sets");
           if (box) box.innerHTML = setsHtml();
-          const fb = popup.querySelector(".mbd-food");
+          const fb = popup.querySelector(".mst-food");
           if (fb) fb.innerHTML = foodHtml();
         });
       },
@@ -785,7 +785,7 @@ export function setup(ctx) {
         try {
           if (r?.isDenied) onQueue(false);
           else if (r?.dismiss === "cancel") onQueue(true);
-        } catch (e) { console.warn("[Township Task Helper]", e); }
+        } catch (e) { console.warn("[Skill Trainer]", e); }
       });
     }
   };
@@ -793,7 +793,7 @@ export function setup(ctx) {
   // ---------- queue (saved locally, one list per character name) ----------
   const Queue = {
     items: [],
-    key() { return `mbd-th-queue:${game.characterName ?? "default"}`; },
+    key() { return `mst-th-queue:${game.characterName ?? "default"}`; },
     load() {
       try { const raw = localStorage.getItem(this.key()); this.items = raw ? JSON.parse(raw) : []; } catch (e) { this.items = []; }
       // the runner never survives a reload, so nothing is "in progress" any more (progress counts are kept)
@@ -804,7 +804,7 @@ export function setup(ctx) {
       updateBadge();
     },
     save() {
-      try { localStorage.setItem(this.key(), JSON.stringify(this.items)); } catch (e) { console.warn("[Township Task Helper] could not save queue", e); }
+      try { localStorage.setItem(this.key(), JSON.stringify(this.items)); } catch (e) { console.warn("[Skill Trainer] could not save queue", e); }
       updateBadge();
       Panel.render();
     },
@@ -838,7 +838,7 @@ export function setup(ctx) {
   };
 
   const updateBadge = () => {
-    const b = document.querySelector("#mbd-queue-btn .mbd-count");
+    const b = document.querySelector("#mst-queue-btn .mst-count");
     if (!b) return;
     const n = Queue.items.filter((e) => e.status !== "done").length;
     b.textContent = n ? String(n) : "";
@@ -990,30 +990,30 @@ export function setup(ctx) {
   const xpSection = (skill, target) => {
     const now = skill.xp ?? 0;
     const left = Math.max(0, target - now);
-    let html = `<div class="mbd-step"><div class="mbd-title">${icon(skill)}<b>${esc(nm(skill))}</b></div><div class="mbd-chips">` +
+    let html = `<div class="mst-step"><div class="mst-title">${icon(skill)}<b>${esc(nm(skill))}</b></div><div class="mst-chips">` +
       chip(`${num(Math.floor(now))} / ${num(target)} XP`) +
       (left > 0 ? chip(`${num(Math.ceil(left))} to go`) : chip('<i class="fa fa-check"></i> Done', "ok")) + `</div></div>`;
     if (left <= 0) return html;
     const ready = xpCandidates(skill);
     const all = ready.length ? ready : xpCandidates(skill, true);
-    if (!all.length) return html + `<div class="mbd-place">Nothing found that you can train with your current levels and materials.</div>`;
+    if (!all.length) return html + `<div class="mst-place">Nothing found that you can train with your current levels and materials.</div>`;
     const best = all[0];
-    html += `<div class="mbd-step"><div class="mbd-stepno">Fastest method right now</div>` +
-      `<div class="mbd-title">${icon(best.a.product ?? best.a.log)}<b>${esc(nm(best.a))}</b></div>` +
-      `<div class="mbd-chips">${chip(`Level ${best.a.level ?? 1}`)}${chip(`${num(Math.round(best.rate))} XP/hour`)}${chip(`About ${fmtTime(left / best.rate)}`, "ok", "Base XP only, ignoring mastery and other bonuses")}</div>` +
+    html += `<div class="mst-step"><div class="mst-stepno">Fastest method right now</div>` +
+      `<div class="mst-title">${icon(best.a.product ?? best.a.log)}<b>${esc(nm(best.a))}</b></div>` +
+      `<div class="mst-chips">${chip(`Level ${best.a.level ?? 1}`)}${chip(`${num(Math.round(best.rate))} XP/hour`)}${chip(`About ${fmtTime(left / best.rate)}`, "ok", "Base XP only, ignoring mastery and other bonuses")}</div>` +
       `</div>`;
     if (!ready.length) {
       const mb = xpMaterialBatch({ id: "preview", skillId: skill.id, targetXp: target });
       if (mb.ok) {
         const steps = mb.entries.filter((x) => x.kind !== "manual").map((x) => chip(`${esc(x.label)} &times;${num(x.qty)}`)).join("");
-        html += `<div class="mbd-step"><div class="mbd-stepno">First, get the materials</div><div class="mbd-chips">${steps}</div>` +
-          `<div class="mbd-note">${esc(mb.note ?? "")}. You don't have them in your bank, so the queue gathers and makes them first, then trains.</div></div>`;
-      } else html += `<div class="mbd-chips">${chip(esc(mb.reason), "warn")}</div>`;
+        html += `<div class="mst-step"><div class="mst-stepno">First, get the materials</div><div class="mst-chips">${steps}</div>` +
+          `<div class="mst-note">${esc(mb.note ?? "")}. You don't have them in your bank, so the queue gathers and makes them first, then trains.</div></div>`;
+      } else html += `<div class="mst-chips">${chip(esc(mb.reason), "warn")}</div>`;
     }
     if (all.length > 1) {
-      html += `<div class="mbd-sec">Next best</div><div class="mbd-chips">` + all.slice(1, 4).map((c) => chip(`${esc(nm(c.a))} &middot; ${num(Math.round(c.rate))}/h`)).join("") + `</div>`;
+      html += `<div class="mst-sec">Next best</div><div class="mst-chips">` + all.slice(1, 4).map((c) => chip(`${esc(nm(c.a))} &middot; ${num(Math.round(c.rate))}/h`)).join("") + `</div>`;
     }
-    html += `<div class="mbd-note">Queued, it keeps picking the best method as you level up, until you reach ${num(target)} XP.</div>`;
+    html += `<div class="mst-note">Queued, it keeps picking the best method as you level up, until you reach ${num(target)} XP.</div>`;
     return html;
   };
   const startBest = (e) => {
@@ -1135,7 +1135,7 @@ export function setup(ctx) {
     },
     haltAction() {
       const s = this.activeSkillId === "combat" ? game.combat : this.activeSkillId ? skillById(this.activeSkillId) : null;
-      try { if (s && game.activeAction === s) game.stopActiveAction(); } catch (e) { console.warn("[Township Task Helper]", e); }
+      try { if (s && game.activeAction === s) game.stopActiveAction(); } catch (e) { console.warn("[Skill Trainer]", e); }
     },
     leave() {
       if (this.activeId === null) return;
@@ -1198,7 +1198,7 @@ export function setup(ctx) {
         const price = game.bank.getItemSalePrice(item, extra);
         game.bank.processItemSale(item, extra);
         entry.sold = `Sold ${extra.toLocaleString()}${entry.sellAll ? "" : " extra"} for ${price.toLocaleString()} ${nm(item.sellsFor.currency)}`;
-      } catch (e) { console.warn("[Township Task Helper] auto-sell", e); }
+      } catch (e) { console.warn("[Skill Trainer] auto-sell", e); }
     },
     finish(entry) {
       this.sellExtra(entry);
@@ -1206,7 +1206,7 @@ export function setup(ctx) {
       delete entry.reason;
       delete entry.started;
       const s = entry.kind === "combat" ? game.combat : skillById(entry.skillId);
-      try { if (s && game.activeAction === s) game.stopActiveAction(); } catch (e) { console.warn("[Township Task Helper]", e); }
+      try { if (s && game.activeAction === s) game.stopActiveAction(); } catch (e) { console.warn("[Skill Trainer]", e); }
       this.activeId = null;
       this.activeSkillId = null;
       Queue.save();
@@ -1405,7 +1405,7 @@ export function setup(ctx) {
     for (const x of entries) x.parent = e.parent ?? e.id;
     return { ok: true, entries, remaining };
   };
-  // ---------- train a skill (no Township task needed) ----------
+  // ---------- train a skill ----------
   // Two goals: make an amount of an item, or train to a level. A level goal never farms blindly: every method is ranked
   // by XP per hour of ALL the work it takes (gathering its materials included), and the plan only switches method when a
   // clearly better one opens up. The queue plans one batch at a time, so it always uses your real level and bank.
@@ -1539,7 +1539,7 @@ export function setup(ctx) {
           if (T1 < T0 * 0.9 && (T0 === Infinity || T0 - T1 > 120000) && (!best || T1 < best.T1)) best = { skill: S, level: R, T0, T1, saveMs: T0 - T1, detourMs: det.totalMs };
         }
       }
-    } catch (e) { console.warn("[Township Task Helper] detour check failed", e); }
+    } catch (e) { console.warn("[Skill Trainer] detour check failed", e); }
     detourMemo.set(key, best);
     return best;
   };
@@ -1616,22 +1616,22 @@ export function setup(ctx) {
   const trainForm = () => {
     const sk = skillById(TS.skillId);
     const sel = (id, body) => `<select id="${id}" class="custom-select custom-select-sm">${body}</select>`;
-    let h = `<div class="mbd-form"><label>Skill</label>${sel("mbd-tr-skill", trainSkills().map((s) => opt(s.id, `${nm(s)} (level ${s.level})`, s.id === TS.skillId)).join(""))}` +
-      `<label>Goal</label>${sel("mbd-tr-goal", opt("level", "Train to a level", TS.goal === "level") + opt("make", "Make an amount of an item", TS.goal === "make"))}`;
+    let h = `<div class="mst-form"><label>Skill</label>${sel("mst-tr-skill", trainSkills().map((s) => opt(s.id, `${nm(s)} (level ${s.level})`, s.id === TS.skillId)).join(""))}` +
+      `<label>Goal</label>${sel("mst-tr-goal", opt("level", "Train to a level", TS.goal === "level") + opt("make", "Make an amount of an item", TS.goal === "make"))}`;
     if (TS.goal === "make") {
-      h += `<label>Item</label>${sel("mbd-tr-item", makeables(sk).map((a) => opt(a.id, `${nm(a.product)} (level ${a.level ?? 1}${(a.level ?? 1) > sk.level ? ", locked" : ""})`, a.id === TS.make)).join(""))}` +
-        `<label>Amount</label><input id="mbd-tr-qty" type="number" min="1" step="1" value="${TS.qty}" class="form-control form-control-sm">`;
+      h += `<label>Item</label>${sel("mst-tr-item", makeables(sk).map((a) => opt(a.id, `${nm(a.product)} (level ${a.level ?? 1}${(a.level ?? 1) > sk.level ? ", locked" : ""})`, a.id === TS.make)).join(""))}` +
+        `<label>Amount</label><input id="mst-tr-qty" type="number" min="1" step="1" value="${TS.qty}" class="form-control form-control-sm">`;
     } else {
-      h += `<label>Target level</label><input id="mbd-tr-level" type="number" min="${sk.level + 1}" max="${levelCapFor(sk)}" step="1" value="${TS.level}" class="form-control form-control-sm">` +
-        `<label>Method</label>${sel("mbd-tr-method", opt("", "Best available (recommended)", !TS.forced) + trainCands(sk).map((c) => opt(c.a.id, `${nm(c.a)} (about ${num(Math.round(c.rate))} XP/h)`, c.a.id === TS.forced)).join(""))}` +
-        `<label>Selling</label><label style="opacity:1"><input id="mbd-tr-sell" type="checkbox"${TS.sell ? " checked" : ""}> Sell the items it makes</label>` +
-        `<label>Mastery</label><label style="opacity:1"><input id="mbd-tr-mastery" type="checkbox"${Settings.preferMastery() ? " checked" : ""}> Prefer mastery XP</label>`;
+      h += `<label>Target level</label><input id="mst-tr-level" type="number" min="${sk.level + 1}" max="${levelCapFor(sk)}" step="1" value="${TS.level}" class="form-control form-control-sm">` +
+        `<label>Method</label>${sel("mst-tr-method", opt("", "Best available (recommended)", !TS.forced) + trainCands(sk).map((c) => opt(c.a.id, `${nm(c.a)} (about ${num(Math.round(c.rate))} XP/h)`, c.a.id === TS.forced)).join(""))}` +
+        `<label>Selling</label><label style="opacity:1"><input id="mst-tr-sell" type="checkbox"${TS.sell ? " checked" : ""}> Sell the items it makes</label>` +
+        `<label>Mastery</label><label style="opacity:1"><input id="mst-tr-mastery" type="checkbox"${Settings.preferMastery() ? " checked" : ""}> Prefer mastery XP</label>`;
     }
     return h + `</div>`;
   };
   const trainBuild = () => {
     const sk = skillById(TS.skillId);
-    if (!sk) return { html: `<div class="mbd-note">No trainable skill found.</div>`, entries: [], problem: "No trainable skill found." };
+    if (!sk) return { html: `<div class="mst-note">No trainable skill found.</div>`, entries: [], problem: "No trainable skill found." };
     if (TS.goal === "make") {
       const act = actionById(sk, TS.make);
       const qty = Math.max(1, Math.floor(TS.qty || 0));
@@ -1643,7 +1643,7 @@ export function setup(ctx) {
       const entries = toEntries(rows);
       const per = Math.max(1, (act.baseQuantity ?? 1) * (stepFor(act)?.craft ? options(act)[0].mult : 1));
       const xp = Math.ceil(qty / per) * (act.baseExperience ?? 0);
-      const head = `<div class="mbd-step"><div class="mbd-title">${icon(item)}<b>Make ${num(qty)} ${esc(nm(item))}</b></div><div class="mbd-chips">` +
+      const head = `<div class="mst-step"><div class="mst-title">${icon(item)}<b>Make ${num(qty)} ${esc(nm(item))}</b></div><div class="mst-chips">` +
         chip(`About ${fmtDur(rowsMs(rows))}`, "ok", "Base speed, counting what your bank already holds") + chip(`${num(xp)} ${esc(nm(sk))} XP`, "", "Base XP, before bonuses") + `</div></div>`;
       return { html: dupHtml(entries) + head + itemSection(item, qty, true), entries };
     }
@@ -1651,37 +1651,37 @@ export function setup(ctx) {
     const L = Math.floor(TS.level || 0);
     if (!(L > sk.level) || L > cap) {
       const msg = sk.level >= cap ? `${nm(sk)} is already at its highest level.` : `Pick a target level between ${sk.level + 1} and ${cap}.`;
-      return { html: `<div class="mbd-note">${esc(msg)}</div>`, entries: [], problem: msg };
+      return { html: `<div class="mst-note">${esc(msg)}</div>`, entries: [], problem: msg };
     }
     const plan = trainPlan(sk, L, TS.forced || null);
     if (!plan.batches.length) {
       const msg = "Nothing here can be trained by the queue on its own at your level (it may need shop items or monster drops).";
-      return { html: `<div class="mbd-step"><div class="mbd-chips">${chip(`<i class="fa fa-exclamation-triangle"></i>&nbsp;${esc(msg)}`, "warn")}</div></div>`, entries: [], problem: msg };
+      return { html: `<div class="mst-step"><div class="mst-chips">${chip(`<i class="fa fa-exclamation-triangle"></i>&nbsp;${esc(msg)}`, "warn")}</div></div>`, entries: [], problem: msg };
     }
     const entries = [{ kind: "train", skillId: sk.id, targetLevel: L, targetXp: xpAt(L), qty: xpAt(L), forced: TS.forced || undefined, sellMade: TS.sell, label: `${nm(sk)}: reach level ${L}` }];
     const dt = TS.forced ? null : bestDetour(sk, L);
-    let html = dupHtml(entries) + `<div class="mbd-step"><div class="mbd-title">${icon(sk)}<b>${esc(nm(sk))}: level ${sk.level} to ${L}</b></div><div class="mbd-chips">` +
+    let html = dupHtml(entries) + `<div class="mst-step"><div class="mst-title">${icon(sk)}<b>${esc(nm(sk))}: level ${sk.level} to ${L}</b></div><div class="mst-chips">` +
       chip(`${num(Math.max(0, Math.ceil(xpAt(L) - (sk.xp ?? 0))))} XP to go`) +
       (dt ? chip(`About ${fmtDur(dt.T1)}`, "ok", `Includes training ${esc(nm(dt.skill))} first`) : plan.blocked == null ? chip(`About ${fmtDur(plan.totalMs)}`, "ok", "Base speeds, gathering the materials included") : chip(`Plan covers up to level ${plan.blocked}`, "warn")) + `</div></div>` +
-      (dt ? `<div class="mbd-step"><div class="mbd-stepno">First</div><div class="mbd-title">${icon(dt.skill)}<b>${esc(nm(dt.skill))} to level ${dt.level}</b></div><div class="mbd-chips">${chip(`About ${fmtDur(dt.detourMs)}`)}${chip(`Saves about ${fmtDur(dt.saveMs)}`, "ok", "Compared with staying on the methods you can use now")}</div><div class="mbd-note">Better ${esc(nm(sk))} methods need materials from ${esc(nm(dt.skill))} level ${dt.level}, so the queue trains it first.</div></div>` : "");
+      (dt ? `<div class="mst-step"><div class="mst-stepno">First</div><div class="mst-title">${icon(dt.skill)}<b>${esc(nm(dt.skill))} to level ${dt.level}</b></div><div class="mst-chips">${chip(`About ${fmtDur(dt.detourMs)}`)}${chip(`Saves about ${fmtDur(dt.saveMs)}`, "ok", "Compared with staying on the methods you can use now")}</div><div class="mst-note">Better ${esc(nm(sk))} methods need materials from ${esc(nm(dt.skill))} level ${dt.level}, so the queue trains it first.</div></div>` : "");
     html += plan.batches.map((b, i) => {
       const a = b.c.a;
       const st = stepFor(a);
       const uses = st?.craft ? [...baseCosts(a), ...options(a)[0].costs].filter((k) => k?.item).map((k) => chip(`${icon(k.item)}${num(k.quantity)} ${esc(nm(k.item))}`)).join("") : "";
-      return `<div class="mbd-step"><div class="mbd-stepno">${i === 0 ? "Starting at" : "Then at"} level ${b.from}${b.to > b.from ? ` (to ${b.to})` : ""}</div>` +
-        `<div class="mbd-title">${icon(a.product)}<b>${esc(nm(a))}</b></div><div class="mbd-chips">${chip(`${num(Math.round(b.c.rate))} XP/hour`, "", "Counting the time to gather or make what it needs")}${chip(`About ${fmtDur(b.ms)}`)}</div>` +
-        (uses ? `<div class="mbd-chips">${chip("<b>Each uses</b>", "lbl")}${uses}</div>` : "") + `</div>`;
+      return `<div class="mst-step"><div class="mst-stepno">${i === 0 ? "Starting at" : "Then at"} level ${b.from}${b.to > b.from ? ` (to ${b.to})` : ""}</div>` +
+        `<div class="mst-title">${icon(a.product)}<b>${esc(nm(a))}</b></div><div class="mst-chips">${chip(`${num(Math.round(b.c.rate))} XP/hour`, "", "Counting the time to gather or make what it needs")}${chip(`About ${fmtDur(b.ms)}`)}</div>` +
+        (uses ? `<div class="mst-chips">${chip("<b>Each uses</b>", "lbl")}${uses}</div>` : "") + `</div>`;
     }).join("");
     let skipped = false;
     if (!TS.forced) {
       const okIds = new Set(trainCands(sk).map((c) => c.a.id));
       skipped = list(sk.actions).some((a) => (a.level ?? 1) <= sk.level && a.baseExperience > 0 && a.product && !okIds.has(a.id) && xpRate(sk, a) > plan.batches[0].c.rate);
     }
-    html += `<div class="mbd-note">Methods are ranked by XP per hour including the time to gather what they need, so it won't farm a mountain of materials for little XP. The queue re-checks your level and bank after every batch.` +
+    html += `<div class="mst-note">Methods are ranked by XP per hour including the time to gather what they need, so it won't farm a mountain of materials for little XP. The queue re-checks your level and bank after every batch.` +
       (skipped ? ` Some faster methods are left out because their materials need higher levels in other skills, or come from the shop or monsters.` : "") + `</div>`;
     return { html, entries };
   };
-  const trainBody = () => `<div id="mbd-tr-form">${trainForm()}</div><div id="mbd-tr-prev">${trainBuild().html}</div>`;
+  const trainBody = () => `<div id="mst-tr-form">${trainForm()}</div><div id="mst-tr-prev">${trainBuild().html}</div>`;
   const trainQueue = (top) => {
     const b = trainBuild();
     if (!b.entries.length) { tellPlayer(b.problem || "Nothing to add."); return; }
@@ -1691,17 +1691,17 @@ export function setup(ctx) {
   };
   const onTrainEvent = (popup, ev) => {
     const el = ev.target, id = el?.id ?? "";
-    if (!id.startsWith("mbd-tr-")) return;
+    if (!id.startsWith("mst-tr-")) return;
     if (ev.type === "input" && (el.tagName === "SELECT" || el.type === "checkbox")) return;
-    if (id === "mbd-tr-skill") { TS.skillId = el.value; TS.make = null; TS.level = null; TS.forced = ""; fixTrain(); popup.querySelector("#mbd-tr-form").innerHTML = trainForm(); }
-    else if (id === "mbd-tr-goal") { TS.goal = el.value; fixTrain(); popup.querySelector("#mbd-tr-form").innerHTML = trainForm(); }
-    else if (id === "mbd-tr-item") TS.make = el.value;
-    else if (id === "mbd-tr-qty") TS.qty = Math.max(1, Math.floor(Number(el.value) || 1));
-    else if (id === "mbd-tr-level") TS.level = Math.floor(Number(el.value) || 0);
-    else if (id === "mbd-tr-method") TS.forced = el.value;
-    else if (id === "mbd-tr-sell") TS.sell = el.checked;
-    else if (id === "mbd-tr-mastery") Settings.set("preferMastery", el.checked);
-    const prev = popup.querySelector("#mbd-tr-prev");
+    if (id === "mst-tr-skill") { TS.skillId = el.value; TS.make = null; TS.level = null; TS.forced = ""; fixTrain(); popup.querySelector("#mst-tr-form").innerHTML = trainForm(); }
+    else if (id === "mst-tr-goal") { TS.goal = el.value; fixTrain(); popup.querySelector("#mst-tr-form").innerHTML = trainForm(); }
+    else if (id === "mst-tr-item") TS.make = el.value;
+    else if (id === "mst-tr-qty") TS.qty = Math.max(1, Math.floor(Number(el.value) || 1));
+    else if (id === "mst-tr-level") TS.level = Math.floor(Number(el.value) || 0);
+    else if (id === "mst-tr-method") TS.forced = el.value;
+    else if (id === "mst-tr-sell") TS.sell = el.checked;
+    else if (id === "mst-tr-mastery") Settings.set("preferMastery", el.checked);
+    const prev = popup.querySelector("#mst-tr-prev");
     if (prev) prev.innerHTML = trainBuild().html;
   };
   const openTrain = () => {
@@ -1720,7 +1720,7 @@ export function setup(ctx) {
     const sk = skillById(e.skillId), a = sk && actionById(sk, e.actionId);
     return a && (a.level ?? 1) > sk.level ? `Needs ${nm(sk)} level ${a.level} (you have ${sk.level})` : null;
   };
-  const POS_KEY = "mbd-th-panel-pos";
+  const POS_KEY = "mst-th-panel-pos";
   const Panel = {
     el: null,
     last: "",
@@ -1740,9 +1740,9 @@ export function setup(ctx) {
     },
     ensure() {
       if (this.el) return this.el;
-      document.getElementById("mbd-queue-panel")?.remove();
+      document.getElementById("mst-queue-panel")?.remove();
       const el = document.createElement("div");
-      el.id = "mbd-queue-panel";
+      el.id = "mst-queue-panel";
       el.style.cssText =
         "position:fixed;right:68px;bottom:16px;width:350px;max-height:70vh;display:none;flex-direction:column;z-index:1050;" +
         "background:rgba(28,32,41,.98);color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:10px;" +
@@ -1849,7 +1849,7 @@ export function setup(ctx) {
         `<i class="fa fa-grip-vertical mr-2" style="opacity:.4"></i>${toggles}<b style="flex:1">Action Queue</b><span class="text-muted mr-2">${pending} action${pending === 1 ? "" : "s"} left</span>` +
         `<a data-act="close" class="pointer-enabled text-white" title="Close"><i class="fa fa-times"></i></a></div>` +
         `<div data-list style="overflow:auto;padding:4px 10px;flex:1">` +
-        (q.length ? q.map((e) => this.row(e)).join("") : `<div class="text-muted py-3 text-center">Nothing queued yet.<br>Open a Township task's play button and choose "Add to queue" or "Add to top".</div>`) +
+        (q.length ? q.map((e) => this.row(e)).join("") : `<div class="text-muted py-3 text-center">Nothing queued yet.<br>Press the chart button in the bottom-right menu to train a skill.</div>`) +
         `</div>` +
         `<div style="padding:10px;border-top:1px solid rgba(255,255,255,.12);text-align:center">` +
         `<div style="position:relative;height:16px;border-radius:8px;background:rgba(255,255,255,.12);overflow:hidden">` +
@@ -1883,28 +1883,28 @@ export function setup(ctx) {
   const mountButton = () => {
     const bar = document.getElementById("skill-footer-minibar");
     if (!bar) return;
-    let b = document.getElementById("mbd-queue-btn");
+    let b = document.getElementById("mst-queue-btn");
     if (!b) {
       b = document.createElement("button");
       b.className = "btn btn-sm btn-light";
-      b.id = "mbd-queue-btn";
+      b.id = "mst-queue-btn";
       b.title = "Action Queue";
       b.style.position = "relative";
       b.innerHTML =
         '<i class="fa fa-list-ol text-dark" style="display:inline-block;width:24px;height:24px;line-height:24px;font-size:17px;text-align:center;vertical-align:middle"></i>' +
-        '<span class="mbd-count" style="display:none;position:absolute;top:-6px;right:-6px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:#17a2b8;color:#fff;font-size:10px;font-weight:600;line-height:17px;text-align:center"></span>';
+        '<span class="mst-count" style="display:none;position:absolute;top:-6px;right:-6px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:#17a2b8;color:#fff;font-size:10px;font-weight:600;line-height:17px;text-align:center"></span>';
       b.addEventListener("click", () => { Panel.toggle(); b.blur(); });
       bar.appendChild(b);
       updateBadge();
     }
-    let tb = document.getElementById("mbd-train-btn");
+    let tb = document.getElementById("mst-train-btn");
     if (!tb) {
       tb = document.createElement("button");
       tb.className = "btn btn-sm btn-light";
-      tb.id = "mbd-train-btn";
+      tb.id = "mst-train-btn";
       tb.title = "Train a skill: queue an item or a level goal";
       tb.innerHTML = '<i class="fa fa-chart-line text-dark" style="display:inline-block;width:24px;height:24px;line-height:24px;font-size:16px;text-align:center;vertical-align:middle"></i>';
-      tb.addEventListener("click", () => { try { openTrain(); } catch (e) { console.warn("[Township Task Helper]", e); } tb.blur(); });
+      tb.addEventListener("click", () => { try { openTrain(); } catch (e) { console.warn("[Skill Trainer]", e); } tb.blur(); });
       bar.insertBefore(tb, b);
     }
     const ref = [...bar.children].find((c) => c !== b && c !== tb && c.offsetWidth > 0);
@@ -1921,12 +1921,12 @@ export function setup(ctx) {
     const dups = entries.filter((e) => keys.has(entryKey(e)));
     if (!dups.length) return "";
     const all = dups.length === entries.length;
-    return `<div class="mbd-step"><div class="mbd-chips">${chip(`<i class="fa fa-exclamation-triangle"></i>&nbsp;${all ? "This task is already in your queue" : `${dups.length} of ${entries.length} steps are already in your queue`}`, "warn")}</div>` +
-      `<div class="mbd-chips">${dups.map((e) => chip(esc(e.label))).join("")}</div>` +
-      `<div class="mbd-note">${all ? "Adding it again does nothing." : "Those steps will be skipped, the rest are added."}</div></div>`;
+    return `<div class="mst-step"><div class="mst-chips">${chip(`<i class="fa fa-exclamation-triangle"></i>&nbsp;${all ? "This task is already in your queue" : `${dups.length} of ${entries.length} steps are already in your queue`}`, "warn")}</div>` +
+      `<div class="mst-chips">${dups.map((e) => chip(esc(e.label))).join("")}</div>` +
+      `<div class="mst-note">${all ? "Adding it again does nothing." : "Those steps will be skipped, the rest are added."}</div></div>`;
   };
   const tellPlayer = (msg) => {
-    try { notifyPlayer(game.township ?? game.attack, msg, "info"); } catch (e) { console.log("[Township Task Helper]", msg); }
+    try { notifyPlayer(game.township ?? game.attack, msg, "info"); } catch (e) { console.log("[Skill Trainer]", msg); }
   };
   const addUnique = (entries, top) => {
     const seen = queuedKeys();
@@ -1940,154 +1940,48 @@ export function setup(ctx) {
     return fresh.length;
   };
 
-  const killEntry = (goal, total) => {
-    const m = goal.monster;
-    const need = total ? goal.quantity : Math.max(0, goal.quantity - (goal._progress ?? 0));
-    if (total ? game.stats.monsterKillCount(m) >= goal.quantity : need <= 0) return [];
-    return [{ kind: "combat", monsterId: m.id, targetKills: need, rel: !total, qty: need, label: `Defeat ${nm(m)}` }];
-  };
-  const describeGoal = (goal) => {
-    const type = goal?.constructor?.name;
-    if (type === "TownshipItemGoal" && goal.item) {
-      return {
-        title: `${goal.quantity.toLocaleString()} x ${esc(nm(goal.item))}`,
-        body: () => { const miss = itemMissing(goal.item, goal.quantity); return miss.length ? missingHtml(miss) : itemSection(goal.item, goal.quantity); },
-        queue: () => (itemMissing(goal.item, goal.quantity).length ? [] : toEntries(buildRows(goal.item, goal.quantity))),
-        blocked: () => itemMissing(goal.item, goal.quantity).length > 0 || !buildRows(goal.item, goal.quantity).length,
-      };
-    }
-    if (type === "TownshipSkillXPGoal" && goal.skill) {
-      return {
-        title: `${esc(nm(goal.skill))}: reach ${goal.quantity.toLocaleString()} XP`,
-        body: () => xpSection(goal.skill, goal.quantity),
-        queue: () => {
-          if ((goal.skill.xp ?? 0) >= goal.quantity) return [];
-          return [{ kind: "xp", skillId: goal.skill.id, targetXp: goal.quantity, qty: goal.quantity, label: `${nm(goal.skill)}: reach ${goal.quantity.toLocaleString()} XP` }];
-        },
-      };
-    }
-    if ((type === "TownshipMonsterGoal" || type === "TownshipCasualMonsterGoal") && goal.monster) {
-      return {
-        title: esc(nm(goal.monster)),
-        body: () => { const miss = areaMissing(goal.monster); return (miss.length ? missingHtml(miss) : "") + monsterSection(goal.monster, goal.quantity); },
-        queue: () => (areaMissing(goal.monster).length ? [] : killEntry(goal, type === "TownshipMonsterGoal")),
-        blocked: () => areaMissing(goal.monster).length > 0,
-      };
-    }
-    if (type === "TownshipMonsterWithItemsGoal" && goal.monster) {
-      return {
-        title: esc(nm(goal.monster)),
-        body: () => {
-          const all = [...areaMissing(goal.monster), ...(goal.items ?? []).flatMap((it) => itemMissing(it, 1))];
-          return (all.length ? missingHtml(all) : "") + monsterSection(goal.monster, goal.quantity) +
-            (all.length ? "" : (goal.items ?? []).map((it) => heading(`Equipment needed: ${esc(nm(it))}`) + itemSection(it, 1)).join(""));
-        },
-        blocked: () => areaMissing(goal.monster).length > 0 || (goal.items ?? []).some((it) => itemMissing(it, 1).length > 0),
-        queue: () => (areaMissing(goal.monster).length || (goal.items ?? []).some((it) => itemMissing(it, 1).length) ? [] : [...(goal.items ?? []).flatMap((it) => toEntries(buildRows(it, 1))), ...killEntry(goal, false)]),
-      };
-    }
-    return null;
-  };
-
-  const decorate = (el, goal) => {
-    const holder = el.container ?? el;
-    holder.querySelector(".mbd-th-btn")?.remove();
-    const info = describeGoal(goal);
-    if (!info) return;
-    // centre the text and the button on one line
-    Object.assign(holder.style, { display: "flex", alignItems: "center", justifyContent: "center", flexWrap: "wrap", gap: "8px" });
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "mbd-th-btn btn btn-sm btn-success";
-    btn.style.cssText = "padding:2px 10px;line-height:1.5;white-space:nowrap;flex:none";
-    btn.title = "Show how to get this (and add it to the queue)";
-    btn.setAttribute("aria-label", "Show how to get this");
-    btn.innerHTML = '<i class="fa fa-play"></i>';
-    btn.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      try {
-        Astro.pick = "best"; Farm.pick = {}; Farm.risk = {};
-        const onQueue = info.queue && !info.blocked?.() ? (top) => {
-          const added = addUnique(info.queue(), top);
-          Panel.open();
-          if (added && Settings.autoStart() && Runner.state !== "running") Runner.start();
-        } : null;
-        fire(info.title, () => dupHtml(info.queue?.()) + info.body(), onQueue);
-      } catch (e) { console.warn("[Township Task Helper]", e); }
-    });
-    holder.appendChild(btn);
-  };
-
   // ---------- install ----------
-  const refresh = () => {
-    try {
-      const t = game.township.tasks;
-      for (const task of list(t.tasks)) t.renderQueue.taskGoals.add(task);
-      t.render();
-    } catch (e) { console.warn("[Township Task Helper] refresh failed", e); }
-  };
-
   const injectStyle = () => {
-    document.getElementById("mbd-th-style")?.remove();
+    document.getElementById("mst-th-style")?.remove();
     const st = document.createElement("style");
-    st.id = "mbd-th-style";
+    st.id = "mst-th-style";
     st.textContent = `
-      .mbd-th-pop{text-align:center}
-      .mbd-step{background:rgba(127,127,127,.12);border:1px solid rgba(127,127,127,.3);border-radius:8px;padding:8px 10px;margin:0 0 8px}
-      .mbd-stepno{font-size:12px;font-weight:600;opacity:.7;margin-bottom:2px}
-      .mbd-title{font-size:15px;margin:2px 0 6px}
-      .mbd-chips{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:5px;margin-top:4px}
-      .mbd-chip{display:inline-flex;align-items:center;gap:3px;padding:1px 9px;border-radius:11px;background:rgba(127,127,127,.22);font-size:12px;line-height:20px}
-      .mbd-chip img,.mbd-title img.skill-icon-xs{width:18px;height:18px;margin:0 3px 0 0;vertical-align:middle}
-      .mbd-chip.ok{background:rgba(48,199,141,.25);color:#2fb67a}
-      .mbd-chip.warn{background:rgba(229,174,103,.25);color:#c98a2b}
-      .mbd-chip.lbl{background:transparent;padding-left:0;opacity:.85}
-      .mbd-sec{font-weight:600;margin:12px 0 4px;font-size:14px;opacity:.85}
-      .mbd-row{margin:8px 0}
-      .mbd-rowlbl{font-size:12px;font-weight:600;opacity:.7}
-      .mbd-chip>span{display:inline;line-height:20px}
-      .mbd-chip small{opacity:.8;font-size:.8em}
-      .mbd-sets .btn{margin:0 2px}
-      .mbd-place{margin:3px 0;font-size:13px}
-      .mbd-place img{width:18px;height:18px;margin-right:4px;vertical-align:middle}
-      .mbd-note{margin-top:8px;font-size:12px;opacity:.7}
-      .mbd-form{display:grid;grid-template-columns:120px 1fr;gap:6px 10px;align-items:center;text-align:left;margin:0 0 10px}
-      .mbd-form label{margin:0;font-size:13px;opacity:.85}
-      .mbd-form select,.mbd-form input[type=number]{width:100%}
+      .mst-th-pop{text-align:center}
+      .mst-step{background:rgba(127,127,127,.12);border:1px solid rgba(127,127,127,.3);border-radius:8px;padding:8px 10px;margin:0 0 8px}
+      .mst-stepno{font-size:12px;font-weight:600;opacity:.7;margin-bottom:2px}
+      .mst-title{font-size:15px;margin:2px 0 6px}
+      .mst-chips{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:5px;margin-top:4px}
+      .mst-chip{display:inline-flex;align-items:center;gap:3px;padding:1px 9px;border-radius:11px;background:rgba(127,127,127,.22);font-size:12px;line-height:20px}
+      .mst-chip img,.mst-title img.skill-icon-xs{width:18px;height:18px;margin:0 3px 0 0;vertical-align:middle}
+      .mst-chip.ok{background:rgba(48,199,141,.25);color:#2fb67a}
+      .mst-chip.warn{background:rgba(229,174,103,.25);color:#c98a2b}
+      .mst-chip.lbl{background:transparent;padding-left:0;opacity:.85}
+      .mst-sec{font-weight:600;margin:12px 0 4px;font-size:14px;opacity:.85}
+      .mst-row{margin:8px 0}
+      .mst-rowlbl{font-size:12px;font-weight:600;opacity:.7}
+      .mst-chip>span{display:inline;line-height:20px}
+      .mst-chip small{opacity:.8;font-size:.8em}
+      .mst-sets .btn{margin:0 2px}
+      .mst-place{margin:3px 0;font-size:13px}
+      .mst-place img{width:18px;height:18px;margin-right:4px;vertical-align:middle}
+      .mst-note{margin-top:8px;font-size:12px;opacity:.7}
+      .mst-form{display:grid;grid-template-columns:120px 1fr;gap:6px 10px;align-items:center;text-align:left;margin:0 0 10px}
+      .mst-form label{margin:0;font-size:13px;opacity:.85}
+      .mst-form select,.mst-form input[type=number]{width:100%}
     `;
     document.head.appendChild(st);
   };
 
   const install = () => {
     injectStyle();
-    const proto = customElements.get("township-task-goal").prototype;
-    const orig = proto.__mbdOrig ?? proto.setGoal;
-    proto.__mbdOrig = orig;
-    proto.setGoal = function (goal) {
-      orig.call(this, goal);
-      try { decorate(this, goal); } catch (e) { console.warn("[Township Task Helper]", e); }
-    };
     Queue.load();
     mountButton();
-    clearInterval(window.__mbdThTimer);
-    window.__mbdThTimer = setInterval(mountButton, 2000); // the game can rebuild the menu; put our button back if it vanishes
-    clearInterval(window.__mbdThRunTimer);
-    window.__mbdThRunTimer = setInterval(() => { try { Runner.step(); } catch (e) { console.warn("[Township Task Helper] runner", e); } }, 1000);
-    refresh();
-    window.townshipHelper = {
+    clearInterval(window.__mstTimer);
+    window.__mstTimer = setInterval(mountButton, 2000); // the game can rebuild the menu; put our button back if it vanishes
+    clearInterval(window.__mstRunTimer);
+    window.__mstRunTimer = setInterval(() => { try { Runner.step(); } catch (e) { console.warn("[Skill Trainer] runner", e); } }, 1000);
+    window.skillTrainer = {
       version: VERSION,
-      showItem: (id, qty = 1) => {
-        Astro.pick = "best"; Farm.pick = {}; Farm.risk = {};
-        const it = itemById(id);
-        const miss = itemMissing(it, qty);
-        fire(`${qty} x ${esc(nm(it))}`, () => (itemMissing(it, qty).length ? missingHtml(itemMissing(it, qty)) : dupHtml(toEntries(buildRows(it, qty))) + itemSection(it, qty)), miss.length || !buildRows(it, qty).length ? null : (top) => {
-          const added = addUnique(toEntries(buildRows(it, qty)), top);
-          Panel.open();
-          if (added && Settings.autoStart() && Runner.state !== "running") Runner.start();
-        });
-      },
-      refresh,
       queue: Queue,
       panel: Panel,
       runner: Runner,
@@ -2095,8 +1989,8 @@ export function setup(ctx) {
       // internals exposed for the test suite in tests/
       _dev: {
         itemMissing, areaMissing, missingHtml, reqText, buildRows, toEntries, itemSection, sourceHtml, buyHtml, buyFromShop, wikiUrl,
-        monsterSection, foodHtml, setsHtml, describeGoal, entryKey, addUnique, dupHtml, tellPlayer, xpCandidates, xpSection, estimateMs,
-        startAction, startEntry, killEntry, areaFor, obtainable, fire, openTrain, trainBuild, trainQueue, TS,
+        monsterSection, foodHtml, setsHtml, entryKey, addUnique, dupHtml, tellPlayer, xpCandidates, xpSection, estimateMs,
+        startAction, startEntry, areaFor, obtainable, fire, openTrain, trainBuild, trainQueue, TS,
         succ, bestDetour, xpMaterialBatch, restockCraft, trainPlan, trainCands, acquireMs, nextBatch, trainEstimate, fmtDur, Astro, Farm, farmSkills, farmFights, farmPlan, fightSafety, monsterMaxHit, dropPerKill, isFarmItem, farmHtml, astroCons, astroOptions, bestCon, astroHtml, isAstroItem,
       },
     };
@@ -2105,8 +1999,7 @@ export function setup(ctx) {
 
   const ready = () =>
     typeof game !== "undefined" &&
-    list(game?.township?.tasks?.tasks).length > 0 &&
-    customElements.get("township-task-goal") &&
+    list(game?.skills).length > 0 &&
     typeof SwalLocale !== "undefined" &&
     document.getElementById("skill-footer-minibar");
 
