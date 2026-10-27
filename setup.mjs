@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.15.2";
+  const VERSION = "0.16.0";
   const LOG = (...a) => console.log("[Township Task Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => {
@@ -100,6 +100,18 @@ export function setup(ctx) {
   // Blessed Offering turns runes into Holy Dust, so it gets recipe-style fields and looks like a
   // recipe to the rest of the helper.
   const MAGIC_ID = "melvorD:Magic";
+  // Herblore recipes list their potions by tier instead of one product, so give them one (the tier your mastery makes)
+  const decorateHerblore = (skill) => {
+    for (const a of list(skill.actions)) {
+      try {
+        if (a.product !== undefined || !a.potions?.length || Object.prototype.hasOwnProperty.call(a, "product")) continue;
+        Object.defineProperties(a, {
+          product: { get: () => a.potions[Math.min(a.potions.length - 1, Math.max(0, skill.getPotionTier?.(a) ?? 0))], configurable: true },
+          baseQuantity: { get: () => 1, configurable: true },
+        });
+      } catch (e) { /* ignore */ }
+    }
+  };
   const decorateSpells = (skill) => {
     for (const sp of list(skill.actions)) {
       try {
@@ -120,6 +132,7 @@ export function setup(ctx) {
     idx = { crafters: new Map(), gatherers: new Map(), randoms: new Map(), droppers: new Map(), shop: new Map() };
     for (const skill of list(game.skills)) {
       if (skill.id === MAGIC_ID) decorateSpells(skill);
+      if (skill.id === "melvorD:Herblore") decorateHerblore(skill);
       for (const a of list(skill.actions)) {
         const isCraft = Array.isArray(a.itemCosts) && (a.itemCosts.length > 0 || (a.alternativeCosts?.length ?? 0) > 0);
         if (a.product) push(isCraft ? idx.crafters : idx.gatherers, a.product.id, { skill, a });
@@ -1046,6 +1059,94 @@ export function setup(ctx) {
   };
   const startEntry = (e) => (e.kind === "xp" ? startBest(e) : e.kind === "combat" ? startCombat(e) : startAction(e));
 
+  // ---------- Farming: plant, wait for the crop to grow, harvest ----------
+  // Farming has no "active action". Crops grow on real-time timers, so the queue plants what the step needs, waits, and harvests.
+  // It only uses plots you already unlocked and seeds you already own.
+  const FARMING_ID = "melvorD:Farming";
+  const PLOT = { locked: 0, empty: 1, growing: 2, grown: 3, dead: 4 };
+  const isFarmEntry = (e) => e?.skillId === FARMING_ID && (e.kind === "gather" || e.kind === "xp");
+  const farmSkill = () => skillById(FARMING_ID);
+  const plotsFor = (f, r) => {
+    try { const p = [...(f.getPlotsForCategory(r.category) ?? [])]; if (p.length) return p; } catch (e) { /* use the fallback */ }
+    return list(f.plots).filter((p) => p.category === r.category);
+  };
+  const openPlots = (f, r) => plotsFor(f, r).filter((p) => p.state !== PLOT.locked);
+  const growMs = (f, r) => { try { const v = f.modifyInterval(r.baseInterval, r); return v > 0 ? v : r.baseInterval; } catch (e) { return r.baseInterval; } };
+  const seedCostOf = (f, r) => { try { return f.getRecipeSeedCost(r); } catch (e) { return r.seedCost?.quantity ?? 1; } };
+  const cropXp = (f, r) => (r.baseExperience ?? 0) * (r.category?.scaleXPWithQuantity ? r.baseQuantity ?? 1 : 1);
+  const plotLeft = (f, p) => { try { return f.getPlotGrowthTime(p); } catch (e) { return 0; } };
+  const farmCrops = (f) => list(f.actions).filter((r) => (!r.realm || r.realm.id === MELVOR_REALM) && r.seedCost?.item && (r.level ?? 1) <= f.level);
+  // the crop that gives the most XP per hour with the plots and seeds you have (ownedOnly: count only what the bank can plant now)
+  const bestCrop = (f, ownedOnly = true) => {
+    let best = null;
+    for (const r of farmCrops(f)) {
+      const plots = openPlots(f, r).length;
+      if (!plots) continue;
+      const cost = seedCostOf(f, r), seeds = have(r.seedCost.item) ?? 0;
+      if (ownedOnly && seeds < cost) continue;
+      const n = ownedOnly ? Math.min(plots, Math.floor(seeds / cost)) : plots;
+      const xpHr = ((cropXp(f, r) * Math.max(1, n)) / growMs(f, r)) * 3600000;
+      if (!best || xpHr > best.xpHr) best = { r, xpHr, plots, n };
+    }
+    return best;
+  };
+  // one pass for a Farming step: harvest what's ready, plant what's needed, say whether to wait
+  const farmStep = (cur) => {
+    const f = farmSkill();
+    if (!f) return { block: "Farming wasn't found in your game version" };
+    const xpMode = cur.kind === "xp";
+    let r = null;
+    if (xpMode) {
+      r = cur.cropId ? actionById(f, cur.cropId) : null;
+      const busy = r && openPlots(f, r).some((p) => p.plantedRecipe === r && p.state !== PLOT.empty);
+      if (!busy) {
+        const b = bestCrop(f);
+        if (!b) return { block: "no seeds to plant. Get some seeds, then press Start" };
+        r = b.r; cur.cropId = r.id;
+      }
+    } else r = actionById(f, cur.actionId);
+    if (!r) return { block: "this crop wasn't found in your game version" };
+    if ((r.level ?? 1) > f.level) return { block: `needs Farming level ${r.level} (you have ${f.level})` };
+    const plots = openPlots(f, r);
+    if (!plots.length) return { block: `you haven't unlocked any ${nm(r.category)} plots yet` };
+    const mine = (p) => p.plantedRecipe === r;
+    for (const p of plots) if (mine(p) && p.state === PLOT.dead) f.clearDeadPlot(p);
+    for (const p of plots) if (mine(p) && p.state === PLOT.grown) f.harvestPlot(p);
+    const per = Math.max(1, r.baseQuantity ?? 1);
+    const done = xpMode ? (f.xp ?? 0) >= cur.targetXp : Runner.gained(cur) >= cur.qty;
+    if (done) return { done: true };
+    const growing = plots.filter((p) => mine(p) && p.state === PLOT.growing);
+    const need = xpMode ? Math.ceil((cur.targetXp - (f.xp ?? 0)) / Math.max(1, cropXp(f, r))) : Math.ceil((cur.qty - Runner.gained(cur)) / per);
+    const toPlant = need - growing.length;
+    if (toPlant > 0) {
+      const empty = plots.filter((p) => p.state === PLOT.empty);
+      const cost = seedCostOf(f, r), seeds = have(r.seedCost.item) ?? 0;
+      const n = Math.min(toPlant, empty.length, Math.floor(seeds / cost));
+      for (let i = 0; i < n; i++) f.plantPlot(empty[i], r);
+      if (n === 0 && !growing.length) {
+        return { block: empty.length ? `needs ${cost} ${nm(r.seedCost.item)} to plant ${nm(r)} and you have ${seeds}. Get some, then press Start` : `all your ${nm(r.category)} plots are busy with other crops. Harvest or clear them, then press Start` };
+      }
+    }
+    const now = plots.filter((p) => mine(p) && p.state === PLOT.growing);
+    if (!now.length) return { again: true };
+    const ms = Math.max(...now.map((p) => plotLeft(f, p)));
+    return { wait: ms, note: `Waiting for ${nm(r)} to grow: ${now.length} planted, ready in ${fmtDur(ms)}` };
+  };
+  // base-speed estimate: every planting round takes one growth time, and each round fills all your plots of that kind
+  const farmEstimate = (e) => {
+    const f = farmSkill();
+    if (!f) return null;
+    if (e.kind === "xp") {
+      const b = bestCrop(f, false);
+      return b && b.xpHr > 0 ? (Math.max(0, e.targetXp - (f.xp ?? 0)) / b.xpHr) * 3600000 : null;
+    }
+    const r = actionById(f, e.actionId);
+    if (!r) return null;
+    const plots = Math.max(1, openPlots(f, r).length);
+    const units = Math.max(0, e.qty - Runner.gained(e));
+    return Math.ceil(units / (Math.max(1, r.baseQuantity ?? 1) * plots)) * growMs(f, r);
+  };
+
   // ---------- time estimates (base speeds; the active entry switches to its measured speed after a few seconds) ----------
   const intervalMs = (skill, a) =>
     a.baseInterval ?? (a.baseMinInterval !== undefined && a.baseMaxInterval !== undefined ? (a.baseMinInterval + a.baseMaxInterval) / 2 : skill.baseInterval) ?? 3000;
@@ -1068,6 +1169,7 @@ export function setup(ctx) {
     if (e.kind === "manual" || e.status === "done") return 0;
     const units = remainingUnits(e);
     if (units <= 0) return 0;
+    if (isFarmEntry(e)) return farmEstimate(e);
     let per = msPerUnit(e);
     if (Runner.state === "running" && Runner.activeId === e.id && e.t0 !== undefined) {
       const dt = Date.now() - e.t0, dg = Runner.gained(e) - e.g0;
@@ -1221,7 +1323,7 @@ export function setup(ctx) {
           delete cur.reason;
           if (cur.kind !== "manual" && cur.kind !== "xp" && (cur.kind !== "combat" || cur.untilItem) && cur.startQty === undefined) cur.startQty = have(itemById(cur.itemId)) ?? 0;
           Queue.save();
-          if (cur.kind !== "manual") {
+          if (cur.kind !== "manual" && !isFarmEntry(cur)) {
             const r = startEntry(cur);
             if (!r.ok && !((cur.kind === "xp" || cur.kind === "craft") && r.noMaterials)) { // an XP step with no materials is handled just below: it adds the steps to get them
               if (r.transient) { this.message = r.reason; Panel.render(); return; }
@@ -1232,6 +1334,16 @@ export function setup(ctx) {
           cur.t0 = Date.now();
           cur.g0 = this.gained(cur);
           if (cur.kind === "combat") { cur.started = true; if (cur.rel && cur.k0 === undefined) cur.k0 = killCount(cur); }
+        }
+
+        if (isFarmEntry(cur)) {
+          const fr = farmStep(cur);
+          if (fr.done) { this.finish(cur); continue; }
+          if (fr.block) { this.block(cur, fr.block); return; }
+          if (fr.again) continue;
+          this.message = fr.note;
+          Panel.render();
+          return;
         }
 
         if (cur.kind === "xp") {
@@ -1484,7 +1596,6 @@ export function setup(ctx) {
     const plan = levelPlan(skill, e.targetLevel, e.forced);
     if (!plan.batches.length) {
       const fa = e.forced && actionById(skill, e.forced);
-      if (skill.id === "melvorD:Herblore") return { ok: false, reason: "Herblore needs herbs and seeds from Farming, which the queue can't run yet. Get the herbs yourself, then press Start" };
       return { ok: false, reason: fa ? `${nm(fa)} can't be trained by the queue at level ${skill.level}` : `nothing at ${nm(skill)} level ${skill.level} can be trained by the queue on its own (it may need shop items or monster drops)` };
     }
     const b = plan.batches[0];
