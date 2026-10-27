@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.15.1";
+  const VERSION = "0.15.2";
   const LOG = (...a) => console.log("[Township Task Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => {
@@ -1484,6 +1484,7 @@ export function setup(ctx) {
     const plan = levelPlan(skill, e.targetLevel, e.forced);
     if (!plan.batches.length) {
       const fa = e.forced && actionById(skill, e.forced);
+      if (skill.id === "melvorD:Herblore") return { ok: false, reason: "Herblore needs herbs and seeds from Farming, which the queue can't run yet. Get the herbs yourself, then press Start" };
       return { ok: false, reason: fa ? `${nm(fa)} can't be trained by the queue at level ${skill.level}` : `nothing at ${nm(skill)} level ${skill.level} can be trained by the queue on its own (it may need shop items or monster drops)` };
     }
     const b = plan.batches[0];

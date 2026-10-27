@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.15.2
+- Fixed: a Herblore XP task now says why it can't run. Herblore needs herbs and seeds from Farming, which the queue can't run yet, so it asks you to get the herbs yourself instead of showing a vague message.
+
 ## 0.15.1
 - Cleanup after Train a skill moved out. The look-ahead across skills, the mastery weighting and the level-goal step type are gone from Task Helper. XP tasks work as before. Level goals saved in an older queue turn into plain XP steps and keep working.
 - The test suite is removed for now. A new one will replace it.
