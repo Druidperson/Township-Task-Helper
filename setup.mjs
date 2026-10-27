@@ -24,7 +24,7 @@ export function setup(ctx) {
   // ---------- settings ----------
   // As a Melvor mod, the switch lives in the mod settings menu (ctx.settings). It is also on the queue panel,
   // and falls back to localStorage if the settings API isn't there (userscript use).
-  const KEYS = { autoStart: ["mbd-th-autostart", false], autoSell: ["mbd-th-autosell", true], buyCompost: ["mbd-th-buycompost", true] };
+  const KEYS = { autoStart: ["mbd-th-autostart", false], autoSell: ["mbd-th-autosell", true], buyCompost: ["mbd-th-buycompost", true], farmMulti: ["mbd-th-farmmulti", true] };
   const Settings = {
     api: null,
     get(name) {
@@ -40,6 +40,7 @@ export function setup(ctx) {
     setAutoStart(v) { this.set("autoStart", v); },
     autoSell() { return this.get("autoSell"); },
     buyCompost() { return this.get("buyCompost"); },
+    farmMulti() { return this.get("farmMulti"); },
   };
   if (typeof ctx !== "undefined" && ctx?.settings) {
     try {
@@ -63,6 +64,13 @@ export function setup(ctx) {
         name: "buyCompost",
         label: "Buy compost for Farming steps",
         hint: "When on, a Farming step buys Compost from the shop if you run short, so crops always grow. It never spends more than a tenth of your gold on one purchase.",
+        default: true,
+      });
+      section.add({
+        type: "switch",
+        name: "farmMulti",
+        label: "Work on other steps while crops grow",
+        hint: "When on, the queue starts the next gathering or fighting step while a Farming step waits for its crops, and comes back when they are ready. Crafting and training steps are never started early.",
         default: true,
       });
       Settings.api = section;
@@ -1210,6 +1218,15 @@ export function setup(ctx) {
     const ms = Math.max(...now.map((p) => plotLeft(f, p)));
     return { wait: ms, note: `Waiting for ${nm(r)} to grow: ${now.length} planted, ready in ${fmtDur(ms)}` };
   };
+  // is there something to do at this Farming step right now (a crop is ready or dead, or nothing is growing)?
+  const farmReady = (e) => {
+    const f = farmSkill();
+    if (!f) return true;
+    const r = e.kind === "xp" ? (e.cropId ? actionById(f, e.cropId) : null) : actionById(f, e.actionId);
+    if (!r) return true;
+    const mine = openPlots(f, r).filter((p) => p.plantedRecipe === r);
+    return mine.some((p) => p.state === PLOT.grown || p.state === PLOT.dead) || !mine.some((p) => p.state === PLOT.growing);
+  };
   // base-speed estimate: every planting round takes one growth time, and each round fills all your plots of that kind
   const farmEstimate = (e) => {
     const f = farmSkill();
@@ -1343,12 +1360,14 @@ export function setup(ctx) {
       this.activeId = null;
       this.activeSkillId = null;
       this.focusId = null;
+      this.farmWatch = null; this.farmFocus = false;
       this.elapsed = 0;
       this.state = "idle";
       this.message = "Stopped";
       Queue.save();
     },
     block(entry, reason) {
+      this.farmWatch = null; if (this.farmFocus) { this.focusId = null; this.farmFocus = false; }
       entry.status = "blocked";
       entry.reason = reason;
       delete entry.started;
@@ -1389,8 +1408,13 @@ export function setup(ctx) {
       if (this.lastTick) this.elapsed += Math.min(nowT - this.lastTick, 5000);
       this.lastTick = nowT;
       for (let guard = 0; guard < 100; guard++) {
+        if (this.farmWatch) { // we stepped away from a Farming step while its crops grow: go back when something is ready
+          const w = Queue.items.find((e) => e.id === this.farmWatch && e.status !== "done");
+          if (!w || farmReady(w)) { this.farmWatch = null; if (this.farmFocus) { this.focusId = null; this.farmFocus = false; } }
+        }
         const cur = this.current();
         if (!cur) { this.leave(); this.setState("idle", "Queue finished"); return; }
+        if (this.farmWatch && this.farmFocus) { const w = Queue.items.find((e) => e.id === this.farmWatch); if (w) { this.message = `Waiting for crops to grow. Working on "${cur.label}" meanwhile`; } }
 
         // a different entry is now on top (we just started, or something was added above): switch to it
         if (this.activeId !== cur.id) {
@@ -1419,6 +1443,11 @@ export function setup(ctx) {
           if (fr.done) { this.finish(cur); continue; }
           if (fr.block) { this.block(cur, fr.block); return; }
           if (fr.again) continue;
+          if (fr.wait > 60000 && Settings.farmMulti() && !this.focusId) {
+            const at = Queue.items.indexOf(cur);
+            const next = Queue.items.find((e, i) => i > at && e.status !== "done" && e.status !== "blocked" && !isFarmEntry(e) && (e.kind === "combat" || (e.kind === "gather" && e.skillId !== ASTRO_ID && (!cur.itemId || e.itemId !== cur.itemId))));
+            if (next) { this.focusId = next.id; this.farmFocus = true; this.farmWatch = cur.id; this.message = `${fr.note}. Working on "${next.label}" meanwhile`; Panel.render(); continue; }
+          }
           this.message = fr.note;
           Panel.render();
           return;
