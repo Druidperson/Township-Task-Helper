@@ -105,13 +105,13 @@ export function setup(ctx) {
     } catch (e) { /* ignore */ }
     return out;
   };
-  // Alt. Magic spells that turn runes into an item (Blessed Offering makes Holy Dust) look like a
-  // recipe to the rest of the helper once they get recipe-style fields.
+  // Blessed Offering turns runes into Holy Dust, so it gets recipe-style fields and looks like a
+  // recipe to the rest of the helper.
   const MAGIC_ID = "melvorD:Magic";
   const decorateSpells = (skill) => {
     for (const sp of list(skill.actions)) {
       try {
-        if (!sp.produces || !(sp.runesRequired?.length) || sp.specialCost?.type !== -5 || "itemCosts" in sp) continue;
+        if (sp.produces?.id !== "melvorF:Holy_Dust" || !(sp.runesRequired?.length) || sp.specialCost?.type !== -5 || "itemCosts" in sp) continue;
         Object.defineProperties(sp, {
           itemCosts: { get: () => sp.runesRequired.map((r) => ({ item: r.item, quantity: r.quantity })), configurable: true },
           product: { get: () => sp.produces, configurable: true },
