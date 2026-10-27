@@ -591,18 +591,18 @@
     has(h, "XP/hour");
   });
 
-  // =====================================================================================
-  const plans = () => TRAINABLE.map((n) => [skill(n)]).filter(([s]) => s);
-
-  const setv = (id, v, type = "change") => { const e = document.getElementById(id); if (e.type === "checkbox") e.checked = v; else e.value = v; e.dispatchEvent(new Event(type, { bubbles: true })); };
-  // opens the popup the way a player does (it starts on the skill page you're on), then picks the skill and goal
-  const open = async (skillName, goal = "level") => {
-    D().TS.goal = "level";
-    D().openTrain();
-    ok(await popupReady(), "popup never finished opening");
-    if (document.getElementById("mbd-tr-skill").value !== "melvorD:" + skillName) setv("mbd-tr-skill", "melvorD:" + skillName);
-    if (goal !== "level") setv("mbd-tr-goal", goal);
-  };
+  const A = "Astrology";
+  const nm = (o) => String(o?.name ?? o?._name ?? o?.id);
+  const stardust = () => game.items.getObjectByID("melvorF:Stardust");
+  const owned = (it) => game.bank.getQty(it);
+  const golden = () => game.items.getObjectByID("melvorF:Golden_Stardust");
+  test(A, "Stardust and Golden Stardust are found as Astrology drops", () => sandbox(async () => {
+    for (const it of [stardust(), golden()]) {
+      ok(it, "item missing from the game");
+      ok(D().isAstroItem(it), nm(it) + " has no constellation");
+      ok(D().astroOptions(it).length >= 2, "needs a list of constellations");
+    }
+  }));
   test(A, "the best pick is the unlocked constellation with the most XP/hour", () => sandbox(async () => {
     const o = D().astroOptions(stardust()).filter((x) => x.open);
     ok(o.length > 0, "no unlocked constellation");
