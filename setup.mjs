@@ -1037,7 +1037,7 @@ export function setup(ctx) {
     const cands = xpCandidates(skill);
     if (!cands.length) {
       const hint = xpCandidates(skill, true)[0];
-      return { ok: false, noMaterials: !!hint, reason: hint ? `no materials for ${nm(hint.a)} or anything else you can train. Get some, then press Start` : `nothing to train at ${nm(skill)} level ${skill.level}` };
+      return { ok: false, noMaterials: !!hint, reason: hint ? `no materials for ${nm(hint.a)} or anything else you can train.` : `nothing to train at ${nm(skill)} level ${skill.level}` };
     }
     let lastReason = "the game wouldn't start it";
     for (const c of cands.slice(0, 15)) {
@@ -1120,7 +1120,7 @@ export function setup(ctx) {
     const seed = r.seedCost.item, cost = seedCostOf(f, r);
     const missing = Math.max(1, Math.ceil(plants * cost - (have(seed) ?? 0)));
     cur.seedTrips = (cur.seedTrips ?? 0) + 1;
-    const pick = (item, qty) => farmFights(item, qty).filter((x) => x.open && x.safety.safe && isFinite(x.ms)).sort((a, b) => a.score - b.score)[0];
+    const all = (item, qty) => farmFights(item, qty).filter((x) => x.open && isFinite(x.ms)), pick = (item, qty) => all(item, qty).filter((x) => x.safety.safe || Farm.risk[item.id]).sort((a, b) => a.score - b.score)[0];
     const viaSeed = pick(seed, missing);
     let direct = null, remaining = 0;
     if (cur.kind === "gather" && cur.itemId) { remaining = Math.max(1, cur.qty - Runner.gained(cur)); direct = pick(itemById(cur.itemId), remaining); }
@@ -1130,7 +1130,10 @@ export function setup(ctx) {
       use = viaSeed;
       if (direct && direct.ms < viaSeed.ms + rounds * growMs(f, r)) { use = direct; item = itemById(cur.itemId); qty = remaining; }
     } else if (direct) { use = direct; item = itemById(cur.itemId); qty = remaining; }
-    if (!use) return { block: `you need ${missing} more ${nm(seed)} and no monster you can fight safely drops them. Get some, then press Start` };
+    if (!use) {
+      const any = all(seed, missing).sort((a, b) => a.score - b.score)[0];
+      return { block: any ? `you need ${missing} more ${nm(seed)}. ${cap(nm(any.m))} drops them, but the fight isn't safe: ${any.safety.why}` : `you need ${missing} more ${nm(seed)} and no monster you can reach drops them` };
+    }
     if (cur.seedTrips > 4) return { block: `fighting for ${nm(seed)} didn't give enough. Check your gear, then press Start` };
     Queue.insertBefore(cur.id, [{ kind: "combat", itemId: item.id, qty, monsterId: use.m.id, untilItem: item.id, targetKills: Math.ceil(qty / use.perKill), label: `Fight ${nm(use.m)} for ${nm(item)}` }]);
     return { again: true };
@@ -1199,7 +1202,7 @@ export function setup(ctx) {
       timers.forEach((ps, t) => f.createGrowthTimer(ps, t));
       if (n === 0 && !growing.length && empty.length && seeds < cost) return fetchSeeds(cur, f, r, Math.min(need, empty.length));
       if (n === 0 && !growing.length) {
-        return { block: empty.length ? `needs ${cost} ${nm(r.seedCost.item)} to plant ${nm(r)} and you have ${seeds}. Get some, then press Start` : `all your ${nm(r.category)} plots are busy with other crops. Harvest or clear them, then press Start` };
+        return { block: empty.length ? `needs ${cost} ${nm(r.seedCost.item)} to plant ${nm(r)} and you have ${seeds}.` : `all your ${nm(r.category)} plots are busy with other crops. Harvest or clear them, then press Start` };
       }
     }
     const now = plots.filter((p) => mine(p) && p.state === PLOT.growing);
