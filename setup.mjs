@@ -1124,7 +1124,12 @@ export function setup(ctx) {
       const empty = plots.filter((p) => p.state === PLOT.empty);
       const cost = seedCostOf(f, r), seeds = have(r.seedCost.item) ?? 0;
       const n = Math.min(toPlant, empty.length, Math.floor(seeds / cost));
-      for (let i = 0; i < n; i++) f.plantPlot(empty[i], r);
+      const timers = new Map(); // the game starts one growth timer per planting time, the same way its own Plant All button does
+      for (let i = 0; i < n; i++) {
+        const t = f.plantPlot(empty[i], r);
+        if (t > 0 && empty[i].state === PLOT.growing) { if (!timers.has(t)) timers.set(t, []); timers.get(t).push(empty[i]); }
+      }
+      timers.forEach((ps, t) => f.createGrowthTimer(ps, t));
       if (n === 0 && !growing.length) {
         return { block: empty.length ? `needs ${cost} ${nm(r.seedCost.item)} to plant ${nm(r)} and you have ${seeds}. Get some, then press Start` : `all your ${nm(r.category)} plots are busy with other crops. Harvest or clear them, then press Start` };
       }
