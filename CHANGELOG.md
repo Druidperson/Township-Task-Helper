@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.20.1
+- Fixed: when the best way to get a dropped item is a fight that isn't safe for you, the step now says which monster to kill, how many kills it takes and why the queue won't run it, instead of just "do this yourself". The popup also warns about it before you add the step.
+
 ## 0.20.0
 - Township Task Helper now needs both Action Queue and Skill Trainer. Action Queue holds the queue, and Skill Trainer knows how to train each skill and run the steps. Install all three.
 

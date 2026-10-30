@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.20.0";
+  const VERSION = "0.20.1";
   const LOG = (...a) => console.log("[Township Task Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => {
@@ -405,7 +405,7 @@ export function setup(ctx) {
       html += `<div class="mbd-chips">${chip(`${esc(nm(o.m))}`)}${chip(`Combat Lv ${num(o.m.combatLevel ?? 0)}`)}${chip(`About ${num(kills)} kills`, "ok", "Average drop rate")}${isFinite(o.ms) ? chip(`About ${fmtDur(o.ms)}`, "ok", "Kill time plus the pause between monsters, using your damage and an average drop rate") : ""}${o.food != null ? chip(`About ${num(o.food)} food`, "", "Food auto eat is expected to use") : ""}${chip(o.safety.safe ? "Safe for you" : "Risky for you", o.safety.safe ? "ok" : "warn", esc(o.safety.why))}</div>` +
         `<div class="mbd-note">${esc(cap(o.safety.why))}.${o.safety.safe ? "" : " Special attacks can hit harder than this."}</div>`;
       if (o.onTask) html += `<div class="mbd-chips">${chip(`<i class="fa fa-skull"></i> Your Slayer task: ${num(o.taskLeft)} left`, "ok", "These kills count toward it")}</div>`;
-      if (!o.safety.safe) html += `<div class="mbd-note">The queue only runs fights that are safe while you're away, so this one is a step you do yourself.</div>`;
+      if (!o.safety.safe) html += `<div class="mbd-chips">${chip("<i class='fa fa-exclamation-triangle'></i> The queue won't run this fight, you do it yourself", "warn", "The queue only runs fights that are safe while you're away")}</div>`;
     } else html += `<div class="mbd-note">Nothing you can do yet gives this item. ${lvlWarn(item.id)}</div>`;
     const task = slayerTaskNow();
     if (task && (!o || o.type !== "fight" || !o.onTask)) {
@@ -558,8 +558,17 @@ export function setup(ctx) {
       const g = idx.gatherers.get(n.item.id)?.[0];
       if (!g) { const d = dropEntry(n.item, n.qty); if (d) return { ...base, ...d }; }
       if (g) return { ...base, kind: "gather", skillId: g.skill.id, actionId: g.a.id, label: `${nm(g.skill)}: gather ${nm(n.item)}` };
-      return { ...base, qty: n.need ?? n.qty, kind: "manual", label: `Get ${nm(n.item)}`, note: plain(sourceText(n.item.id)) };
+      const why = riskyFightNote(n.item, n.qty);
+      return { ...base, qty: n.need ?? n.qty, kind: "manual", label: why ? `Fight ${why.name} for ${nm(n.item)}` : `Get ${nm(n.item)}`, note: why ? why.note : plain(sourceText(n.item.id)) };
     });
+  // The best fight for a random drop isn't safe, so the queue can't run it. Say which fight it is and why, instead of a vague note.
+  const riskyFightNote = (item, qty) => {
+    if (!isFarmItem(item)) return null;
+    const o = farmPlan(item, false, qty).opt;
+    if (o?.type !== "fight" || o.safety.safe) return null;
+    const kills = Math.ceil(qty / o.perKill);
+    return { name: nm(o.m), note: `Kill ${nm(o.m)} until you own ${num(qty)} ${nm(item)} (about ${num(kills)} kills). The queue only runs fights that are safe while you're away, and this one isn't: ${o.safety.why}. Do it yourself, or fix that and add the step again.` };
+  };
   // A random drop runs as an Action Queue gather step: study a constellation, train a skill that drops it, or fight a monster
   // that drops it (safe fights only). unitMs is the average time per item, so the queue's time estimate is right.
   const dropEntry = (item, qty) => {
