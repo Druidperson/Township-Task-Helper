@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.21.0
+- New: a switch in the mod settings called "Fights don't need auto eat". If you're playing while the queue runs and eat yourself, turn it on and fights count as safe without auto eat or food equipped. It still refuses a monster that can hit for half your HP or more.
+
 ## 0.20.1
 - Fixed: when the best way to get a dropped item is a fight that isn't safe for you, the step now says which monster to kill, how many kills it takes and why the queue won't run it, instead of just "do this yourself". The popup also warns about it before you add the step.
 

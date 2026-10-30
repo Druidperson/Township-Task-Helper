@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.20.1";
+  const VERSION = "0.21.0";
   const LOG = (...a) => console.log("[Township Task Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => {
@@ -285,6 +285,16 @@ export function setup(ctx) {
       return Math.floor(nmult() * sp.maxHit * (1 + statVal(m, "magicDamageBonus") / 100) * (1 + ((lv.Magic ?? 1) + 1) / 200));
     } catch (e) { return null; }
   };
+  // One switch in the mod settings menu (ctx.settings), with localStorage as the fallback.
+  let setSec = null;
+  try {
+    setSec = ctx.settings.section("Township Task Helper");
+    setSec.add({ type: "switch", name: "noAutoEat", label: "Fights don't need auto eat", hint: "Turn this on if you're playing while the queue runs and will eat yourself. Fights then count as safe without auto eat or food equipped, as long as the monster can't hit for half your HP or more.", default: false });
+  } catch (e) { setSec = null; }
+  const noAutoEat = () => {
+    try { const v = setSec?.get("noAutoEat"); if (v !== undefined && v !== null) return !!v; } catch (e) { /* use the fallback */ }
+    try { return localStorage.getItem("mbd-th-noautoeat") === "1"; } catch (e) { return false; }
+  };
   // what you have to survive with: HP, equipped food and the auto eat settings (a queue runs while you're away, so only auto eat counts)
   const playerGuard = () => {
     const pl = game.combat?.player;
@@ -325,6 +335,7 @@ export function setup(ctx) {
     if (max === null) return { safe: false, max, avg: null, g, why: "can't tell how hard it hits" };
     const avg = (1 + max) / 2;
     if (max * 2 >= g.hp) return { safe: false, max, avg, g, why: `can hit for ${num(max)} against your ${num(g.hp)} HP` };
+    if (noAutoEat()) return { safe: true, max, avg, g, why: `it hits for ${num(max)} at most against your ${num(g.hp)} HP, and you're set to eat yourself` };
     if (!g.food) return { safe: false, max, avg, g, why: "you have no food equipped" };
     const dpk = damagePerKill(m, avg);
     const total = dpk === null ? null : dpk * kills;
