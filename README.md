@@ -2,9 +2,16 @@
 
 # Township Task Helper
 
-Township tasks take a lot of planning. Which ore, how many bars, which arrows, which monster, what level. Township Task Helper plans every task for you, then hands it to the Action Queue so you don't have to sit there and grind.
+Township tasks take a lot of planning. Which ore, how many bars, which arrows, which monster, what level. Township Task Helper plans every task for you, then sends the steps to your queue so you can walk away.
 
-Township Task Helper needs two other mods: Action Queue, where the steps go, and Skill Trainer, which knows how to train each skill. Install all three.
+## Before you install
+
+Township Task Helper needs two other mods to work:
+
+- Action Queue, which holds your queue and runs the steps
+- Skill Trainer, which knows how to train each skill
+
+Install both, then Task Helper. Without them Task Helper shows a warning and stops.
 
 ## Getting started
 
@@ -13,10 +20,6 @@ Open Township and go to your task list. Every requirement has a green play butto
 ## One click, full plan
 
 Every task in your Township list gets a green play button. Press it and you see the steps in order for exactly what you still need. Already have the logs? That step is skipped. Not high enough level? You find out right away, before you spend an hour on it. Short on feathers? Buy them from the same window.
-
-## Training has its own mod
-
-The Train a skill window now lives in its own mod, Skill Trainer, so you can use it without Township tasks. Task Helper still plans the training an XP task needs, it just doesn't have the button anymore.
 
 ## Stardust, handled
 
@@ -32,9 +35,9 @@ Monster tasks show how the enemy attacks, what it's weak to and where to find it
 
 ## Let it run
 
-Add a plan to the Action Queue and walk away. It gathers, crafts, trains and fights, one step after another, and pauses with a note if something needs you. Start it before bed and wake up to finished tasks.
+Add a plan to your queue and walk away. It gathers, crafts, trains, fights and even plants and harvests crops, one step after another, and pauses with a note if something needs you. Start it before bed and wake up to finished tasks.
 
-Skill Trainer adds its steps to the same queue, so the two work side by side.
+The queue lives in Action Queue, so Task Helper and Skill Trainer share one list and one panel.
 
 ## Small things that save time
 
