@@ -1,9 +1,9 @@
-// Township Task Helper: task breakdowns + action queue for Melvor Idle
+// Township Task Helper: Township task breakdowns for Melvor Idle. The steps run in the Action Queue mod.
 export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.18.0";
+  const VERSION = "0.19.0";
   const LOG = (...a) => console.log("[Township Task Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => {
@@ -15,70 +15,30 @@ export function setup(ctx) {
   const esc = (s) =>
     String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const plain = (html) => { const d = document.createElement("div"); d.innerHTML = html; return d.textContent; };
-  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const push = (m, k, v) => { if (!m.has(k)) m.set(k, []); m.get(k).push(v); };
   const icon = (o) => (typeof o?.media === "string" ? `<img class="skill-icon-xs mr-1" src="${esc(o.media)}">` : "");
   const have = (item) => {
     try { const q = game.bank.getQty(item); return Number.isFinite(q) ? q : null; } catch (e) { return null; }
   };
-  // ---------- settings ----------
-  // As a Melvor mod, the switch lives in the mod settings menu (ctx.settings). It is also on the queue panel,
-  // and falls back to localStorage if the settings API isn't there (userscript use).
-  const KEYS = { autoStart: ["mbd-th-autostart", false], autoSell: ["mbd-th-autosell", true], buyCompost: ["mbd-th-buycompost", true], farmMulti: ["mbd-th-farmmulti", true] };
-  const Settings = {
-    api: null,
-    get(name) {
-      try { if (this.api) { const v = this.api.get(name); if (v !== undefined && v !== null) return !!v; } } catch (e) { /* use fallback */ }
-      try { const raw = localStorage.getItem(KEYS[name][0]); if (raw !== null) return raw === "1"; } catch (e) { /* ignore */ }
-      return KEYS[name][1];
-    },
-    set(name, v) {
-      try { if (this.api) this.api.set(name, !!v); } catch (e) { console.warn("[Township Task Helper] settings", e); }
-      try { localStorage.setItem(KEYS[name][0], v ? "1" : "0"); } catch (e) { /* ignore */ }
-    },
-    autoStart() { return this.get("autoStart"); },
-    setAutoStart(v) { this.set("autoStart", v); },
-    autoSell() { return this.get("autoSell"); },
-    buyCompost() { return this.get("buyCompost"); },
-    farmMulti() { return this.get("farmMulti"); },
+  // The queue, its panel and the code that runs steps in the game live in the Action Queue mod, which this mod needs.
+  // Township Task Helper works out what a task takes and adds the steps there.
+  const aq = () => (typeof mod !== "undefined" && mod?.api?.actionQueue) || window.actionQueue;
+  const MELVOR_REALM = "melvorD:Melvor", HITPOINTS = "melvorD:Hitpoints";
+  const intervalMs = (skill, a) =>
+    a.baseInterval ?? (a.baseMinInterval !== undefined && a.baseMaxInterval !== undefined ? (a.baseMinInterval + a.baseMaxInterval) / 2 : skill.baseInterval) ?? 3000;
+  const fmtDur = (ms) => {
+    if (!isFinite(ms)) return "an unknown time";
+    const m = Math.round(ms / 60000);
+    if (m < 1) return "under 1 min";
+    if (m < 60) return `${m} min`;
+    return `${Math.floor(m / 60)} h ${m % 60} min`;
   };
-  if (typeof ctx !== "undefined" && ctx?.settings) {
-    try {
-      const section = ctx.settings.section("General");
-      section.add({
-        type: "switch",
-        name: "autoStart",
-        label: "Automatically start the Action Queue when adding a task",
-        hint: "When on, adding a task to the queue starts the queue right away. When off, you press Start yourself.",
-        default: false,
-      });
-      section.add({
-        type: "switch",
-        name: "autoSell",
-        label: "Automatically sell extras the queue makes",
-        hint: "When a step makes more than the task needs (like arrowtips crafted in batches), the extra is sold. It never sells anything you already owned.",
-        default: true,
-      });
-      section.add({
-        type: "switch",
-        name: "buyCompost",
-        label: "Buy compost for Farming steps",
-        hint: "When on, a Farming step buys Compost from the shop if you run short, so crops always grow. It never spends more than a tenth of your gold on one purchase.",
-        default: true,
-      });
-      section.add({
-        type: "switch",
-        name: "farmMulti",
-        label: "Work on other steps while crops grow",
-        hint: "When on, the queue starts the next gathering or fighting step while a Farming step waits for its crops, and comes back when they are ready. Crafting and training steps are never started early.",
-        default: true,
-      });
-      Settings.api = section;
-    } catch (e) { console.warn("[Township Task Helper] could not register settings", e); }
-  }
+  const areaFor = (m) => {
+    for (const key of ["combatAreas", "slayerAreas"]) for (const a of list(game[key])) if ((a.monsters ?? []).includes(m)) return a;
+    return null;
+  };
   const itemById = (id) => { try { return game.items.getObjectByID(id); } catch (e) { return null; } };
   const skillById = (id) => list(game.skills).find((s) => s.id === id);
-  const actionById = (skill, id) => list(skill?.actions).find((a) => a.id === id);
 
   // drops that live in a skill's own mechanics instead of a random product list:
   // gems while mining, general rare items while thieving, special finds while fishing.
@@ -285,7 +245,7 @@ export function setup(ctx) {
   // Bird Nest and friends are random drops. Order of preference: a skill that drops it while you train (best XP/hour),
   // then a fight that is safe for you, then a risky fight only if the player says so. A Slayer task on a monster that drops
   // the item is shown as an option because those kills count twice.
-  const Farm = { pick: {}, risk: {} };
+  const Farm = { pick: {} };
   const farmPick = (item) => Farm.pick[item.id] ?? "best";
   const isFarmItem = (item) => {
     if (!item) return false;
@@ -444,7 +404,7 @@ export function setup(ctx) {
       html += `<div class="mbd-chips">${chip(`${esc(nm(o.m))}`)}${chip(`Combat Lv ${num(o.m.combatLevel ?? 0)}`)}${chip(`About ${num(kills)} kills`, "ok", "Average drop rate")}${isFinite(o.ms) ? chip(`About ${fmtDur(o.ms)}`, "ok", "Kill time plus the pause between monsters, using your damage and an average drop rate") : ""}${o.food != null ? chip(`About ${num(o.food)} food`, "", "Food auto eat is expected to use") : ""}${chip(o.safety.safe ? "Safe for you" : "Risky for you", o.safety.safe ? "ok" : "warn", esc(o.safety.why))}</div>` +
         `<div class="mbd-note">${esc(cap(o.safety.why))}.${o.safety.safe ? "" : " Special attacks can hit harder than this."}</div>`;
       if (o.onTask) html += `<div class="mbd-chips">${chip(`<i class="fa fa-skull"></i> Your Slayer task: ${num(o.taskLeft)} left`, "ok", "These kills count toward it")}</div>`;
-      if (!o.safety.safe) html += `<label class="mbd-note" style="display:block"><input type="checkbox" data-mbd-risk="${esc(item.id)}"${Farm.risk[item.id] ? " checked" : ""}> I understand the risk, queue this fight anyway</label>`;
+      if (!o.safety.safe) html += `<div class="mbd-note">The queue only runs fights that are safe while you're away, so this one is a step you do yourself.</div>`;
     } else html += `<div class="mbd-note">Nothing you can do yet gives this item. ${lvlWarn(item.id)}</div>`;
     const task = slayerTaskNow();
     if (task && (!o || o.type !== "fight" || !o.onTask)) {
@@ -595,18 +555,23 @@ export function setup(ctx) {
         return { ...base, kind: "craft", skillId: c.skill.id, actionId: c.a.id, altIndex: 0, label: `${nm(c.skill)}: make ${nm(n.item)}` };
       }
       const g = idx.gatherers.get(n.item.id)?.[0];
-      if (!g && isAstroItem(n.item)) {
-        const ch = conChoice(n.item);
-        if (ch) return { ...base, kind: "gather", skillId: ASTRO_ID, actionId: ch.c.id, constellation: Astro.pick === "best" ? "best" : ch.c.id, label: `${nm(astroSkill())}: study ${nm(ch.c)} for ${nm(n.item)}` };
-      }
-      if (!g && isFarmItem(n.item)) {
-        const fp = farmPlan(n.item, false, n.qty), o = fp.opt;
-        if (o && o.type === "skill") return { ...base, kind: "gather", skillId: o.skill.id, actionId: o.a.id, farm: fp.auto ? "best" : "fixed", label: `${nm(o.skill)}: ${nm(o.a)} for ${nm(n.item)}` };
-        if (o && o.type === "fight" && (o.safety.safe || Farm.risk[n.item.id])) return { ...base, kind: "combat", monsterId: o.m.id, untilItem: n.item.id, targetKills: Math.ceil(n.qty / o.perKill), label: `Fight ${nm(o.m)} for ${nm(n.item)}` };
-      }
+      if (!g) { const d = dropEntry(n.item, n.qty); if (d) return { ...base, ...d }; }
       if (g) return { ...base, kind: "gather", skillId: g.skill.id, actionId: g.a.id, label: `${nm(g.skill)}: gather ${nm(n.item)}` };
       return { ...base, qty: n.need ?? n.qty, kind: "manual", label: `Get ${nm(n.item)}`, note: plain(sourceText(n.item.id)) };
     });
+  // A random drop runs as an Action Queue gather step: study a constellation, train a skill that drops it, or fight a monster
+  // that drops it (safe fights only). unitMs is the average time per item, so the queue's time estimate is right.
+  const dropEntry = (item, qty) => {
+    if (isAstroItem(item)) {
+      const ch = conChoice(item);
+      if (ch) return { kind: "gather", skillId: ASTRO_ID, actionId: ch.c.id, unitMs: ch.perHr > 0 ? 3600000 / ch.perHr : undefined, label: `${nm(astroSkill())}: study ${nm(ch.c)} for ${nm(item)}` };
+    }
+    if (!isFarmItem(item)) return null;
+    const o = farmPlan(item, false, qty).opt, fid = o?.type === "fight" && aq()?.fightId(o.m);
+    if (o?.type === "skill") return { kind: "gather", skillId: o.skill.id, actionId: o.a.id, unitMs: o.perHr > 0 ? 3600000 / o.perHr : undefined, label: `${nm(o.skill)}: ${nm(o.a)} for ${nm(item)}` };
+    if (fid && o.safety.safe) return { kind: "gather", skillId: HITPOINTS, actionId: fid, unitMs: isFinite(o.ms) ? o.ms / Math.max(1, qty) : undefined, label: `Fight ${nm(o.m)} for ${nm(item)}` };
+    return null;
+  };
 
   const AREA_KINDS = [
     ["combatAreas", "Combat Area"], ["slayerAreas", "Slayer Area"], ["dungeons", "Dungeon"],
@@ -754,10 +719,8 @@ export function setup(ctx) {
         }
         popup?.addEventListener?.("change", (ev) => {
           const fs = ev.target?.closest?.("[data-mbd-farm]");
-          const fr = ev.target?.closest?.("[data-mbd-risk]");
-          if (fs || fr) {
-            if (fs) Farm.pick[fs.dataset.mbdFarm] = fs.value;
-            if (fr) Farm.risk[fr.dataset.mbdRisk] = fr.checked;
+          if (fs) {
+            Farm.pick[fs.dataset.mbdFarm] = fs.value;
             const pop2 = popup.querySelector(".mbd-th-pop");
             if (pop2) pop2.innerHTML = bodyFn();
             return;
@@ -811,1145 +774,43 @@ export function setup(ctx) {
     }
   };
 
-  // ---------- queue (saved locally, one list per character name) ----------
-  const Queue = {
-    items: [],
-    key() { return `mbd-th-queue:${game.characterName ?? "default"}`; },
-    load() {
-      try { const raw = localStorage.getItem(this.key()); this.items = raw ? JSON.parse(raw) : []; } catch (e) { this.items = []; }
-      // the runner never survives a reload, so nothing is "in progress" any more (progress counts are kept)
-      for (const e of this.items) {
-        if (e.kind === "train") { e.kind = "xp"; delete e.targetLevel; delete e.now; delete e.afterLevel; } // old level goals from before Train a skill moved to its own mod
-        if (e.status === "active" || e.status === "waiting" || e.status === "blocked") e.status = "pending";
-        delete e.reason; delete e.ack; delete e.t0; delete e.g0; delete e.started;
-      }
-      updateBadge();
-    },
-    save() {
-      try { localStorage.setItem(this.key(), JSON.stringify(this.items)); } catch (e) { console.warn("[Township Task Helper] could not save queue", e); }
-      updateBadge();
-      Panel.render();
-    },
-    add(entries, top = false) {
-      const fresh = entries.map((e) => ({ ...e, id: uid(), status: "pending" }));
-      this.items = top ? [...fresh, ...this.items] : [...this.items, ...fresh];
-      this.save();
-    },
-    insertBefore(id, entries) {
-      const fresh = entries.map((e) => ({ ...e, id: uid(), status: "pending" }));
-      const i = this.items.findIndex((e) => e.id === id);
-      if (i < 0) this.items.push(...fresh); else this.items.splice(i, 0, ...fresh);
-      this.save();
-    },
-    remove(id) { this.items = this.items.filter((e) => e.id !== id); this.save(); },
-    move(id, dir) {
-      const i = this.items.findIndex((e) => e.id === id), j = i + dir;
-      if (i < 0 || j < 0 || j >= this.items.length) return;
-      [this.items[i], this.items[j]] = [this.items[j], this.items[i]];
-      this.save();
-    },
-    toTop(id) {
-      const i = this.items.findIndex((e) => e.id === id);
-      if (i <= 0) return;
-      const [e] = this.items.splice(i, 1);
-      this.items.unshift(e);
-      this.save();
-    },
-    clearDone() { this.items = this.items.filter((e) => e.status !== "done"); this.save(); },
-    clear() { Runner.stop(); this.items = []; this.save(); },
-  };
-
-  const updateBadge = () => {
-    const b = document.querySelector("#mbd-queue-btn .mbd-count");
-    if (!b) return;
-    const n = Queue.items.filter((e) => e.status !== "done").length;
-    b.textContent = n ? String(n) : "";
-    b.style.display = n ? "block" : "none";
-  };
-
-  // ---------- starting actions in the game ----------
-  // Uses the game's own click handlers, in the same order its buttons use them.
-  const startAction = (e) => {
-    let skill = skillById(e.skillId);
-    if (e.farm === "best" && e.kind === "gather") { const it = itemById(e.itemId), b = it && bestFarmSkill(it); if (b) { e.skillId = b.skill.id; e.actionId = b.a.id; skill = skillById(e.skillId); } }
-    if (skill?.id === ASTRO_ID && e.constellation === "best") { const it = itemById(e.itemId), b = it && bestCon(it); if (b) e.actionId = b.c.id; }
-    const a = skill && actionById(skill, e.actionId);
-    if (!skill || !a) return { ok: false, reason: "this action wasn't found in your game version" };
-    if (a.level > skill.level) return { ok: false, reason: `needs ${nm(skill)} level ${a.level}` };
-    try {
-      if (game.activeAction && game.activeAction !== skill) game.stopActiveAction();
-      if (skill.isActive && skill.stop() === false) return { ok: false, reason: "couldn't stop the current activity" };
-      switch (skill.id) {
-        case "melvorD:Woodcutting":
-          skill.activeTrees.clear();
-          skill.selectTree(a);
-          break;
-        case "melvorD:Mining":
-          if (a.isRespawning) return { ok: false, transient: true, reason: "waiting for the rock to respawn" };
-          if (!skill.canMineOre(a)) return { ok: false, reason: "can't mine this yet (level, mastery or shop unlock)" };
-          skill.selectedRock = undefined;
-          skill.onRockClick(a);
-          break;
-        case "melvorD:Fishing": {
-          const area = list(skill.areas).find((ar) => (ar.fish ?? []).includes(a));
-          if (!area) return { ok: false, reason: "no fishing area found for this fish" };
-          skill.onAreaFishSelection(area, a);
-          skill.onAreaStartButtonClick(area);
-          break;
-        }
-        case "melvorD:Magic":
-          skill.selectSpellOnClick(a);
-          if (!skill.isActive) skill.castButtonOnClick();
-          break;
-        case "melvorD:Thieving":
-          if (!a.area) return { ok: false, reason: "no thieving area found for this target" };
-          skill.startThieving(a.area, a);
-          break;
-        case "melvorD:Firemaking":
-          if (have(a.log) !== null && have(a.log) < 1) return { ok: false, reason: `no ${nm(a.log)} in the bank` };
-          skill.selectLog(a);
-          skill.burnLog();
-          break;
-        case "melvorD:Astrology":
-          skill.studyConstellationOnClick(a);
-          break;
-        case "melvorD:Cooking":
-          skill.onRecipeSelectionClick(a);
-          skill.onActiveCookButtonClick(a.category);
-          break;
-        default:
-          if (typeof skill.selectRecipeOnClick === "function" && typeof skill.createButtonOnClick === "function") {
-            skill.selectRecipeOnClick(a);
-            if (a.alternativeCosts?.length && typeof skill.selectAltRecipeOnClick === "function") skill.selectAltRecipeOnClick(e.altIndex ?? 0);
-            if (!skill.isActive) skill.createButtonOnClick();
-          } else {
-            return { ok: false, reason: `automating ${nm(skill)} isn't supported yet` };
-          }
-      }
-    } catch (err) {
-      return { ok: false, reason: "error: " + err.message };
-    }
-    if (skill.isActive) return { ok: true };
-    return { ok: false, noMaterials: e.kind === "craft" && (a.level ?? 1) <= skill.level, reason: e.kind === "craft" ? "not enough materials (or level too low)" : "the game wouldn't start it" };
-  };
-
-  // ---------- XP goals: pick the fastest XP method the player can use right now ----------
-  const MELVOR_REALM = "melvorD:Melvor";
-  const xpRate = (skill, a) => {
-    const ms = a.baseInterval ?? (a.baseMinInterval !== undefined && a.baseMaxInterval !== undefined ? (a.baseMinInterval + a.baseMaxInterval) / 2 : skill.baseInterval) ?? 3000;
-    return ms > 0 ? (((a.baseExperience ?? 0) * succ(skill, a)) / ms) * 3600000 : 0;
-  };
-  // which recipe input option (if any) the bank can pay for right now; null = not affordable
-  const affordableOption = (a) => {
-    const owns = (costs) => (costs ?? []).every((c) => !c?.item || (have(c.item) ?? 0) >= c.quantity);
-    if (a.log) return (have(a.log) ?? 0) >= 1 ? 0 : null;
-    if (a.alternativeCosts?.length) {
-      const i = a.alternativeCosts.findIndex((o) => owns(a.itemCosts) && owns(o.itemCosts));
-      return i >= 0 ? i : null;
-    }
-    return owns(a.itemCosts) ? 0 : null;
-  };
-  // can the player get this item with the levels they have now? (bank, gathering, shop, monster drops, or crafting it from such things)
-  const obtCache = { t: 0, m: new Map() };
-  const obtainableRaw = (item, seen, depth) => {
-    if (!item) return false;
-    if ((have(item) ?? 0) > 0) return true;
-    buildIndex();
-    const id = item.id;
-    if (seen.has(id) || depth > 6) return false;
-    seen.add(id);
-    const lvlOk = (x) => (x.a.level ?? 1) <= x.skill.level;
-    if (idx.gatherers.get(id)?.some(lvlOk) || idx.randoms.get(id)?.some(lvlOk)) return true;
-    try { if (idx.shop.get(id)?.some((p) => game.checkRequirements(p.purchaseRequirements))) return true; } catch (e) { /* ignore */ }
-    try { if (idx.droppers.get(id)?.some((m) => areaFor(m) && !areaMissing(m).length)) return true; } catch (e) { /* ignore */ }
-    for (const c of idx.crafters.get(id) ?? []) {
-      if (!lvlOk(c)) continue;
-      if (options(c.a).some((o) => [...baseCosts(c.a), ...o.costs].every((k) => !k?.item || obtainableRaw(k.item, new Set(seen), depth + 1)))) return true;
-    }
-    return false;
-  };
-  const obtainable = (item) => {
-    const now = Date.now();
-    if (now - obtCache.t > 5000) { obtCache.m.clear(); obtCache.t = now; }
-    if (!item) return false;
-    if (!obtCache.m.has(item.id)) obtCache.m.set(item.id, obtainableRaw(item, new Set(), 0));
-    return obtCache.m.get(item.id);
-  };
-  const feasibleOption = (a) => {
-    if (a.log) return obtainable(a.log) ? 0 : null;
-    if (a.alternativeCosts?.length) {
-      const i = a.alternativeCosts.findIndex((o) => [...baseCosts(a), ...(o.itemCosts ?? [])].every((k) => !k?.item || obtainable(k.item)));
-      return i >= 0 ? i : null;
-    }
-    return baseCosts(a).every((k) => !k?.item || obtainable(k.item)) ? 0 : null;
-  };
-  const needsInputs = (a) => !!a.log || (Array.isArray(a.itemCosts) && a.itemCosts.length > 0) || (a.alternativeCosts?.length ?? 0) > 0;
-  // best first. With ignoreMaterials, crafting skills are ranked even if the bank can't pay for them.
-  const xpCandidates = (skill, ignoreMaterials = false) => {
-    const out = [];
-    for (const a of list(skill.actions)) {
-      if (a.realm && a.realm.id !== MELVOR_REALM) continue;
-      if ((a.level ?? 1) > skill.level || !(a.baseExperience > 0)) continue;
-      let altIndex = 0;
-      if (needsInputs(a)) {
-        let opt = affordableOption(a);
-        if (opt === null) {
-          if (!ignoreMaterials) continue;
-          opt = feasibleOption(a);
-          if (opt === null) continue;
-        }
-        altIndex = opt;
-      }
-      out.push({ a, altIndex, rate: xpRate(skill, a) });
-    }
-    return out.sort((x, y) => y.rate - x.rate);
-  };
-  const fmtTime = (h) => {
-    if (!isFinite(h)) return "?";
-    const m = Math.round(h * 60);
-    return m < 60 ? `${Math.max(1, m)} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
-  };
-  const xpSection = (skill, target) => {
-    const now = skill.xp ?? 0;
-    const left = Math.max(0, target - now);
-    let html = `<div class="mbd-step"><div class="mbd-title">${icon(skill)}<b>${esc(nm(skill))}</b></div><div class="mbd-chips">` +
-      chip(`${num(Math.floor(now))} / ${num(target)} XP`) +
-      (left > 0 ? chip(`${num(Math.ceil(left))} to go`) : chip('<i class="fa fa-check"></i> Done', "ok")) + `</div></div>`;
-    if (left <= 0) return html;
-    const ready = xpCandidates(skill);
-    const all = ready.length ? ready : xpCandidates(skill, true);
-    if (!all.length) return html + `<div class="mbd-place">Nothing found that you can train with your current levels and materials.</div>`;
-    const best = all[0];
-    html += `<div class="mbd-step"><div class="mbd-stepno">Fastest method right now</div>` +
-      `<div class="mbd-title">${icon(best.a.product ?? best.a.log)}<b>${esc(nm(best.a))}</b></div>` +
-      `<div class="mbd-chips">${chip(`Level ${best.a.level ?? 1}`)}${chip(`${num(Math.round(best.rate))} XP/hour`)}${chip(`About ${fmtTime(left / best.rate)}`, "ok", "Base XP only, ignoring mastery and other bonuses")}</div>` +
-      `</div>`;
-    if (!ready.length) {
-      const mb = xpMaterialBatch({ id: "preview", skillId: skill.id, targetXp: target });
-      if (mb.ok) {
-        const steps = mb.entries.filter((x) => x.kind !== "manual").map((x) => chip(`${esc(x.label)} &times;${num(x.qty)}`)).join("");
-        html += `<div class="mbd-step"><div class="mbd-stepno">First, get the materials</div><div class="mbd-chips">${steps}</div>` +
-          `<div class="mbd-note">${esc(mb.note ?? "")}. You don't have them in your bank, so the queue gathers and makes them first, then trains.</div></div>`;
-      } else html += `<div class="mbd-chips">${chip(esc(mb.reason), "warn")}</div>`;
-    }
-    if (all.length > 1) {
-      html += `<div class="mbd-sec">Next best</div><div class="mbd-chips">` + all.slice(1, 4).map((c) => chip(`${esc(nm(c.a))} &middot; ${num(Math.round(c.rate))}/h`)).join("") + `</div>`;
-    }
-    html += `<div class="mbd-note">Queued, it keeps picking the best method as you level up, until you reach ${num(target)} XP.</div>`;
-    return html;
-  };
-  const startBest = (e) => {
-    const skill = skillById(e.skillId);
-    if (!skill) return { ok: false, reason: "this skill wasn't found in your game version" };
-    if ((skill.xp ?? 0) >= e.targetXp) return { ok: true };
-    const cands = xpCandidates(skill);
-    if (!cands.length) {
-      const hint = xpCandidates(skill, true)[0];
-      return { ok: false, noMaterials: !!hint, reason: hint ? `no materials for ${nm(hint.a)} or anything else you can train.` : `nothing to train at ${nm(skill)} level ${skill.level}` };
-    }
-    let lastReason = "the game wouldn't start it";
-    for (const c of cands.slice(0, 15)) {
-      const r = startAction({ skillId: e.skillId, actionId: c.a.id, altIndex: c.altIndex, kind: "xp" });
-      if (r.ok) { e.t0 = Date.now(); e.g0 = Math.floor(skill.xp ?? 0); e.lvl = skill.level; e.method = `${nm(c.a)} (~${Math.round(c.rate).toLocaleString()} XP/h)`; return r; }
-      if (r.transient) lastReason = r.reason;
-      else if (!/needs .* level/.test(r.reason)) lastReason = r.reason;
-    }
-    return { ok: false, reason: lastReason };
-  };
-  const areaFor = (m) => {
-    for (const key of ["combatAreas", "slayerAreas"]) for (const a of list(game[key])) if ((a.monsters ?? []).includes(m)) return a;
-    return null;
-  };
-  const killCount = (e) => { try { return game.stats.monsterKillCount(game.monsters.getObjectByID(e.monsterId)) ?? 0; } catch (err) { return 0; } };
-  const startCombat = (e) => {
-    const m = game.monsters.getObjectByID(e.monsterId);
-    if (!m) return { ok: false, reason: "this monster wasn't found in your game version" };
-    const area = areaFor(m);
-    if (!area) return { ok: false, reason: "this monster is in a dungeon or special area, so fight it yourself, then press Start" };
-    try {
-      if (game.activeAction && game.activeAction !== game.combat) game.stopActiveAction();
-      game.combat.selectMonster(m, area);
-    } catch (err) { return { ok: false, reason: "error: " + err.message }; }
-    if (game.activeAction === game.combat && game.combat.selectedMonster === m) return { ok: true };
-    return { ok: false, reason: "couldn't start the fight (area requirements or a damage type rule)" };
-  };
-  const startEntry = (e) => (e.kind === "xp" ? startBest(e) : e.kind === "combat" ? startCombat(e) : startAction(e));
-
-  // ---------- Farming: plant, wait for the crop to grow, harvest ----------
-  // Farming has no "active action". Crops grow on real-time timers, so the queue plants what the step needs, waits, and harvests.
-  // It only uses plots you already unlocked and seeds you already own.
-  const FARMING_ID = "melvorD:Farming";
-  const PLOT = { locked: 0, empty: 1, growing: 2, grown: 3, dead: 4 };
-  const isFarmEntry = (e) => e?.skillId === FARMING_ID && (e.kind === "gather" || e.kind === "xp");
-  const farmSkill = () => skillById(FARMING_ID);
-  const plotsFor = (f, r) => {
-    try { const p = [...(f.getPlotsForCategory(r.category) ?? [])]; if (p.length) return p; } catch (e) { /* use the fallback */ }
-    return list(f.plots).filter((p) => p.category === r.category);
-  };
-  const openPlots = (f, r) => plotsFor(f, r).filter((p) => p.state !== PLOT.locked);
-  const growMs = (f, r) => { try { const v = f.modifyInterval(r.baseInterval, r); return v > 0 ? v : r.baseInterval; } catch (e) { return r.baseInterval; } };
-  const seedCostOf = (f, r) => { try { return f.getRecipeSeedCost(r); } catch (e) { return r.seedCost?.quantity ?? 1; } };
-  // without compost a crop only grows about half the time, and a dead crop gives nothing and loses its seeds
-  const cropChance = (f, r) => { try { return Math.min(1, Math.max(0.05, f.getPlotGrowthChance({ compostLevel: 0, plantedRecipe: r }) / 100)); } catch (e) { return 1; } };
-  // XP one planting is worth on average (some crops give their XP when planted, the rest only when harvested)
-  const cropXp = (f, r) => (r.baseExperience ?? 0) * (r.category?.scaleXPWithQuantity ? r.baseQuantity ?? 1 : 1) * (r.category?.giveXPOnPlant ? 1 : cropChance(f, r));
-  const COMPOST_ID = "melvorD:Compost", GLOOP_ID = "melvorD:Weird_Gloop";
-  const compostNeed = (item, level = 0) => Math.max(1, Math.ceil((100 - level) / (item?.compostValue || 20)));
-  const compostPrice = () => { try { return game.shop.purchases.getObjectByID(COMPOST_ID)?.costs?.currencies?.find((c) => c.currency?.id === "melvorD:GP")?.cost ?? 0; } catch (e) { return 0; } };
-  const compostBudget = () => (game.gp?.amount ?? 0) * 0.1; // one purchase never takes more than a tenth of your gold
-  // how many plots could be fully composted (100% growth) right now, from your bank plus what the shop would sell
-  const compostCover = () => {
-    try {
-      const cp = itemById(COMPOST_ID), gl = itemById(GLOOP_ID);
-      if (!cp) return 0;
-      let cover = (gl ? have(gl) ?? 0 : 0) + Math.floor((have(cp) ?? 0) / compostNeed(cp));
-      const price = compostPrice();
-      if (Settings.buyCompost() && price > 0) cover += Math.floor(compostBudget() / (price * compostNeed(cp)));
-      return cover;
-    } catch (e) { return 0; }
-  };
-  // growth chance across n plots, counting the ones compost can cover
-  const blendChance = (f, r, n) => { const base = cropChance(f, r); const k = Math.max(1, n), cov = Math.min(k, compostCover()); return (cov + (k - cov) * base) / k; };
-  const applyCompost = (f, plots) => {
-    const cp = itemById(COMPOST_ID), gl = itemById(GLOOP_ID);
-    if (!cp) return;
-    for (const p of plots) {
-      if (p.state !== PLOT.empty || p.compostLevel >= 100) continue;
-      try {
-        if (gl && (have(gl) ?? 0) > 0) { f.compostPlot(p, gl, 1); continue; }
-        const need = compostNeed(cp, p.compostLevel), own = have(cp) ?? 0, price = compostPrice();
-        if (own < need && Settings.buyCompost() && price > 0 && (need - own) * price <= compostBudget()) buyFromShop(COMPOST_ID, need - own);
-        if ((have(cp) ?? 0) >= need) f.compostPlot(p, cp, need);
-      } catch (e) { console.warn("[Township Task Helper] compost", e); }
-    }
-  };
-  // seeds ran short: add a fight that drops them (or the crop itself, if that's quicker) in front of this step
-  const fetchSeeds = (cur, f, r, plants) => {
-    const seed = r.seedCost.item, cost = seedCostOf(f, r);
-    const missing = Math.max(1, Math.ceil(plants * cost - (have(seed) ?? 0)));
-    cur.seedTrips = (cur.seedTrips ?? 0) + 1;
-    const all = (item, qty) => farmFights(item, qty).filter((x) => x.open && isFinite(x.ms)), pick = (item, qty) => all(item, qty).filter((x) => x.safety.safe || Farm.risk[item.id]).sort((a, b) => a.score - b.score)[0];
-    const viaSeed = pick(seed, missing);
-    let direct = null, remaining = 0;
-    if (cur.kind === "gather" && cur.itemId) { remaining = Math.max(1, cur.qty - Runner.gained(cur)); direct = pick(itemById(cur.itemId), remaining); }
-    let use = null, item = seed, qty = missing;
-    if (viaSeed) {
-      const plots = Math.max(1, openPlots(f, r).length), rounds = cur.kind === "gather" ? Math.ceil(remaining / (Math.max(1, r.baseQuantity ?? 1) * plots)) : 1;
-      use = viaSeed;
-      if (direct && direct.ms < viaSeed.ms + rounds * growMs(f, r)) { use = direct; item = itemById(cur.itemId); qty = remaining; }
-    } else if (direct) { use = direct; item = itemById(cur.itemId); qty = remaining; }
-    if (!use) {
-      const any = all(seed, missing).sort((a, b) => a.score - b.score)[0];
-      return { block: any ? `you need ${missing} more ${nm(seed)}. ${cap(nm(any.m))} drops them, but the fight isn't safe: ${any.safety.why}` : `you need ${missing} more ${nm(seed)} and no monster you can reach drops them` };
-    }
-    if (cur.seedTrips > 4) return { block: `fighting for ${nm(seed)} didn't give enough. Check your gear` };
-    Queue.insertBefore(cur.id, [{ kind: "combat", itemId: item.id, qty, monsterId: use.m.id, untilItem: item.id, targetKills: Math.ceil(qty / use.perKill), label: `Fight ${nm(use.m)} for ${nm(item)}` }]);
-    return { again: true };
-  };
-  const plotLeft = (f, p) => { try { return f.getPlotGrowthTime(p); } catch (e) { return 0; } };
-  const seedIds = () => { const f = farmSkill(); return new Set(list(f?.actions).map((r) => r.seedCost?.item?.id).filter(Boolean)); };
-  const isSeedItem = (item) => !!item && seedIds().has(item.id);
-  const farmCrops = (f) => list(f.actions).filter((r) => (!r.realm || r.realm.id === MELVOR_REALM) && r.seedCost?.item && (r.level ?? 1) <= f.level);
-  // the crop that gives the most XP per hour with the plots and seeds you have (ownedOnly: count only what the bank can plant now)
-  const bestCrop = (f, ownedOnly = true) => {
-    let best = null;
-    for (const r of farmCrops(f)) {
-      const plots = openPlots(f, r).length;
-      if (!plots) continue;
-      const cost = seedCostOf(f, r), seeds = have(r.seedCost.item) ?? 0;
-      if (ownedOnly && seeds < cost) continue;
-      const n = ownedOnly ? Math.min(plots, Math.floor(seeds / cost)) : plots;
-      const xpHr = ((cropXp(f, r) * Math.max(1, n)) / growMs(f, r)) * 3600000;
-      if (!best || xpHr > best.xpHr) best = { r, xpHr, plots, n };
-    }
-    return best;
-  };
-  // one pass for a Farming step: harvest what's ready, plant what's needed, say whether to wait.
-  // plants extra to make up for crops that die; growing ones count at their chance too
-  const farmStep = (cur) => {
-    const f = farmSkill();
-    if (!f) return { block: "Farming wasn't found in your game version" };
-    const xpMode = cur.kind === "xp";
-    let r = null;
-    if (xpMode) {
-      r = cur.cropId ? actionById(f, cur.cropId) : null;
-      const busy = r && openPlots(f, r).some((p) => p.plantedRecipe === r && p.state !== PLOT.empty);
-      if (!busy) {
-        const b = bestCrop(f);
-        if (!b) {
-          const w = bestCrop(f, false);
-          if (!w) return { block: "no crop you can plant yet. Unlock a plot or level up Farming" };
-          return fetchSeeds(cur, f, w.r, w.plots);
-        }
-        r = b.r; cur.cropId = r.id;
-      }
-    } else r = actionById(f, cur.actionId);
-    if (!r) return { block: "this crop wasn't found in your game version" };
-    if ((r.level ?? 1) > f.level) return { block: `needs Farming level ${r.level} (you have ${f.level})` };
-    const plots = openPlots(f, r);
-    if (!plots.length) return { block: `you haven't unlocked any ${nm(r.category)} plots yet` };
-    const mine = (p) => p.plantedRecipe === r;
-    for (const p of plots) if (mine(p) && p.state === PLOT.dead) f.clearDeadPlot(p);
-    for (const p of plots) if (mine(p) && p.state === PLOT.grown) f.harvestPlot(p);
-    const per = Math.max(1, r.baseQuantity ?? 1);
-    const done = xpMode ? (f.xp ?? 0) >= cur.targetXp : Runner.gained(cur) >= cur.qty;
-    if (done) return { done: true };
-    const growing = plots.filter((p) => mine(p) && p.state === PLOT.growing);
-    const need = xpMode ? Math.ceil((cur.targetXp - (f.xp ?? 0)) / Math.max(1, cropXp(f, r))) : Math.ceil((cur.qty - Runner.gained(cur)) / (per * blendChance(f, r, plots.length)));
-    const toPlant = need - Math.ceil(growing.length);
-    if (toPlant > 0) {
-      const empty = plots.filter((p) => p.state === PLOT.empty);
-      const cost = seedCostOf(f, r), seeds = have(r.seedCost.item) ?? 0;
-      const n = Math.min(toPlant, empty.length, Math.floor(seeds / cost));
-      applyCompost(f, empty.slice(0, n));
-      const timers = new Map(); // the game starts one growth timer per planting time, the same way its own Plant All button does
-      for (let i = 0; i < n; i++) {
-        const t = f.plantPlot(empty[i], r);
-        if (t > 0 && empty[i].state === PLOT.growing) { if (!timers.has(t)) timers.set(t, []); timers.get(t).push(empty[i]); }
-      }
-      timers.forEach((ps, t) => f.createGrowthTimer(ps, t));
-      if (n === 0 && !growing.length && empty.length && seeds < cost) return fetchSeeds(cur, f, r, Math.min(need, empty.length));
-      if (n === 0 && !growing.length) {
-        return { block: empty.length ? `needs ${cost} ${nm(r.seedCost.item)} to plant ${nm(r)} and you have ${seeds}.` : `all your ${nm(r.category)} plots are busy with other crops. Harvest or clear them` };
-      }
-    }
-    const now = plots.filter((p) => mine(p) && p.state === PLOT.growing);
-    if (!now.length) return { again: true };
-    const ms = Math.max(...now.map((p) => plotLeft(f, p)));
-    return { wait: ms, note: `Waiting for ${nm(r)} to grow: ${now.length} planted, ready in ${fmtDur(ms)}` };
-  };
-  // is there something to do at this Farming step right now (a crop is ready or dead, or nothing is growing)?
-  const farmReady = (e) => {
-    const f = farmSkill();
-    if (!f) return true;
-    const r = e.kind === "xp" ? (e.cropId ? actionById(f, e.cropId) : null) : actionById(f, e.actionId);
-    if (!r) return true;
-    const mine = openPlots(f, r).filter((p) => p.plantedRecipe === r);
-    return mine.some((p) => p.state === PLOT.grown || p.state === PLOT.dead) || !mine.some((p) => p.state === PLOT.growing);
-  };
-  // base-speed estimate: every planting round takes one growth time, and each round fills all your plots of that kind
-  const farmEstimate = (e) => {
-    const f = farmSkill();
-    if (!f) return null;
-    if (e.kind === "xp") {
-      const b = bestCrop(f, false);
-      return b && b.xpHr > 0 ? (Math.max(0, e.targetXp - (f.xp ?? 0)) / b.xpHr) * 3600000 : null;
-    }
-    const r = actionById(f, e.actionId);
-    if (!r) return null;
-    const plots = Math.max(1, openPlots(f, r).length);
-    const units = Math.max(0, e.qty - Runner.gained(e));
-    return Math.ceil(units / (Math.max(1, r.baseQuantity ?? 1) * blendChance(f, r, plots) * plots)) * growMs(f, r);
-  };
-
-  // ---------- time estimates (base speeds; the active entry switches to its measured speed after a few seconds) ----------
-  const intervalMs = (skill, a) =>
-    a.baseInterval ?? (a.baseMinInterval !== undefined && a.baseMaxInterval !== undefined ? (a.baseMinInterval + a.baseMaxInterval) / 2 : skill.baseInterval) ?? 3000;
-  const msPerUnit = (e) => {
-    const skill = skillById(e.skillId);
-    if (!skill) return null;
-    if (e.kind === "combat") return null;
-    if (e.kind === "xp") { const best = xpCandidates(skill, true)[0]; return best && best.rate > 0 ? 3600000 / best.rate : null; }
-    const a = actionById(skill, e.actionId);
-    if (!a) return null;
-    if (skill.id === ASTRO_ID && e.itemId) { const r = astroPerHour(skill, a, itemById(e.itemId)); return r > 0 ? 3600000 / r : null; }
-    if (e.kind === "gather" && e.itemId && (!a.product || a.product.id !== e.itemId)) { const o = farmSkills(itemById(e.itemId)).find((x) => x.a === a); return o && o.perHr > 0 ? 3600000 / o.perHr : null; }
-    const ms = intervalMs(skill, a);
-    if (e.kind === "gather") return ms / Math.max(1, a.baseQuantity ?? 1);
-    const opt = options(a)[e.altIndex ?? 0];
-    return ms / (Math.max(1, (a.baseQuantity ?? 1) * (opt?.mult ?? 1)) * succ(skill, a));
-  };
-  const remainingUnits = (e) => (e.kind === "combat" ? Math.max(0, e.targetKills - Runner.gained(e)) : e.kind === "xp" ? Math.max(0, e.targetXp - (skillById(e.skillId)?.xp ?? 0)) : Math.max(0, e.qty - Runner.gained(e)));
-  const estimateMs = (e) => {
-    if (e.kind === "manual" || e.status === "done") return 0;
-    const units = remainingUnits(e);
-    if (units <= 0) return 0;
-    if (isFarmEntry(e)) return farmEstimate(e);
-    let per = msPerUnit(e);
-    if (Runner.state === "running" && Runner.activeId === e.id && e.t0 !== undefined) {
-      const dt = Date.now() - e.t0, dg = Runner.gained(e) - e.g0;
-      if (dt > 10000 && dg > 0) per = dt / dg;
-    }
-    return per === null ? null : units * per;
-  };
-  const fmtDur = (ms) => {
-    const m = Math.round(ms / 60000);
-    if (m < 1) return "under 1 min";
-    if (m < 60) return `${m} min`;
-    return `${Math.floor(m / 60)} h ${m % 60} min`;
-  };
-  const fmtClock = (ms) => {
-    const d = new Date(Date.now() + ms);
-    const t = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-    return d.toDateString() === new Date().toDateString() ? t : `${d.toLocaleDateString([], { weekday: "short" })} ${t}`;
-  };
-
-  // ---------- runner: takes entries from the top of the list, one at a time ----------
-  const Runner = {
-    state: "idle", // idle | running | paused
-    message: "",
-    activeId: null,
-    activeSkillId: null,
-    setState(s, msg = "") { this.state = s; this.message = msg; Panel.render(); },
-    elapsed: 0, // running time since the queue was started (for the progress bar)
-    lastTick: null,
-    eta() {
-      let ms = 0, unknown = 0, manual = 0;
-      for (const e of Queue.items) {
-        if (e.status === "done") continue;
-        if (e.kind === "manual") { manual++; continue; }
-        const t = estimateMs(e);
-        if (t === null) unknown++; else ms += t;
-      }
-      return { ms, unknown, manual };
-    },
-    focusId: null, // "Do this first": run this entry now without moving it in the list
-    current() {
-      const f = this.focusId && Queue.items.find((e) => e.id === this.focusId && e.status !== "done");
-      if (!f) this.focusId = null;
-      return f || Queue.items.find((e) => e.status !== "done");
-    },
-    doFirst(id) {
-      const e = Queue.items.find((x) => x.id === id);
-      if (!e || e.status === "done") return;
-      this.focusId = id;
-      if (e.status === "blocked" || e.status === "waiting") e.status = "pending";
-      if (this.state === "running") { this.step(); Panel.render(); } else this.start();
-    },
-    gained(e) {
-      if (e.kind === "combat") { const c = killCount(e); return e.rel ? Math.max(0, c - (e.k0 ?? c)) : c; }
-      if (e.kind === "xp") return Math.floor(skillById(e.skillId)?.xp ?? 0);
-      if (e.startQty === undefined) return 0;
-      return Math.max(0, (have(itemById(e.itemId)) ?? 0) - e.startQty);
-    },
-    haltAction() {
-      const s = this.activeSkillId === "combat" ? game.combat : this.activeSkillId ? skillById(this.activeSkillId) : null;
-      try { if (s && game.activeAction === s) game.stopActiveAction(); } catch (e) { console.warn("[Township Task Helper]", e); }
-    },
-    leave() {
-      if (this.activeId === null) return;
-      const prev = Queue.items.find((e) => e.id === this.activeId);
-      if (prev && prev.status === "active") prev.status = "pending";
-      if (prev) delete prev.started;
-      this.haltAction();
-      this.activeId = null;
-      this.activeSkillId = null;
-    },
-    start() {
-      const cur = this.current();
-      if (!cur) { this.setState("idle", "Nothing to run: the queue is empty or finished."); return; }
-      if (cur.kind === "manual" && cur.status === "waiting") cur.ack = true;
-      delete cur.started;
-      if (this.state === "idle") this.elapsed = 0;
-      this.state = "running";
-      this.message = "";
-      this.step();
-      Panel.render();
-    },
-    pause(msg = "Paused") {
-      if (this.state !== "running") return;
-      this.haltAction();
-      this.setState("paused", msg);
-    },
-    stop() {
-      this.haltAction();
-      const cur = Queue.items.find((e) => e.id === this.activeId);
-      if (cur && cur.status !== "done") { cur.status = "pending"; delete cur.startQty; delete cur.reason; delete cur.started; }
-      // a manual step that was waiting for you goes back to pending, so pressing Start later doesn't count it as done
-      for (const e of Queue.items) if (e.status === "waiting") e.status = "pending";
-      this.activeId = null;
-      this.activeSkillId = null;
-      this.focusId = null;
-      this.farmWatch = null; this.farmFocus = false;
-      this.elapsed = 0;
-      this.state = "idle";
-      this.message = "Stopped";
-      Queue.save();
-    },
-    block(entry, reason) {
-      this.farmWatch = null; if (this.farmFocus) { this.focusId = null; this.farmFocus = false; }
-      entry.status = "blocked";
-      entry.reason = reason;
-      delete entry.started;
-      this.haltAction();
-      this.activeId = null;
-      this.activeSkillId = null;
-      Queue.save();
-      this.setState("paused", `Stopped at "${entry.label}": ${reason}. Fix it, then press Start.`);
-    },
-    sellExtra(entry) {
-      try {
-        if ((!Settings.autoSell() && !entry.sellAll) || (entry.kind !== "craft" && entry.kind !== "gather") || entry.startQty === undefined) return;
-        const item = itemById(entry.itemId);
-        if (!item || !(item.sellsFor?.quantity > 0) || isAstroItem(item)) return;
-        const bi = game.bank.items.get(item);
-        if (!bi || bi.locked) return;
-        const extra = Math.min(bi.quantity, bi.quantity - entry.startQty - (entry.sellAll ? 0 : entry.qty));
-        if (!(extra >= 1)) return;
-        const price = game.bank.getItemSalePrice(item, extra);
-        game.bank.processItemSale(item, extra);
-        entry.sold = `Sold ${extra.toLocaleString()}${entry.sellAll ? "" : " extra"} for ${price.toLocaleString()} ${nm(item.sellsFor.currency)}`;
-      } catch (e) { console.warn("[Township Task Helper] auto-sell", e); }
-    },
-    finish(entry) {
-      this.sellExtra(entry);
-      entry.status = "done";
-      delete entry.reason;
-      delete entry.started;
-      const s = entry.kind === "combat" ? game.combat : skillById(entry.skillId);
-      try { if (s && game.activeAction === s) game.stopActiveAction(); } catch (e) { console.warn("[Township Task Helper]", e); }
-      this.activeId = null;
-      this.activeSkillId = null;
-      Queue.save();
-    },
-    step() {
-      if (this.state !== "running") { this.lastTick = null; return; }
-      const nowT = Date.now();
-      if (this.lastTick) this.elapsed += Math.min(nowT - this.lastTick, 5000);
-      this.lastTick = nowT;
-      for (let guard = 0; guard < 100; guard++) {
-        if (this.farmWatch) { // we stepped away from a Farming step while its crops grow: go back when something is ready
-          const w = Queue.items.find((e) => e.id === this.farmWatch && e.status !== "done");
-          if (!w || farmReady(w)) { this.farmWatch = null; this.message = ""; if (this.farmFocus) { this.focusId = null; this.farmFocus = false; } }
-        }
-        const cur = this.current();
-        if (!cur) { this.leave(); this.setState("idle", "Queue finished"); return; }
-        if (this.farmWatch && this.farmFocus) { const w = Queue.items.find((e) => e.id === this.farmWatch); if (w) { this.message = `Waiting for crops to grow. Working on "${cur.label}" meanwhile`; } }
-
-        // a different entry is now on top (we just started, or something was added above): switch to it
-        if (this.activeId !== cur.id) {
-          this.leave();
-          this.activeId = cur.id;
-          this.activeSkillId = cur.kind === "combat" ? "combat" : cur.skillId ?? null;
-          cur.status = "active";
-          delete cur.reason;
-          if (cur.kind !== "manual" && cur.kind !== "xp" && (cur.kind !== "combat" || cur.untilItem) && cur.startQty === undefined) cur.startQty = have(itemById(cur.itemId)) ?? 0;
-          Queue.save();
-          if (cur.kind !== "manual" && !isFarmEntry(cur)) {
-            const r = startEntry(cur);
-            if (!r.ok && !((cur.kind === "xp" || cur.kind === "craft") && r.noMaterials)) { // an XP step with no materials is handled just below: it adds the steps to get them
-              if (r.transient) { this.message = r.reason; Panel.render(); return; }
-              this.block(cur, r.reason);
-              return;
-            }
-          }
-          cur.t0 = Date.now();
-          cur.g0 = this.gained(cur);
-          if (cur.kind === "combat") { cur.started = true; if (cur.rel && cur.k0 === undefined) cur.k0 = killCount(cur); }
-        }
-
-        if (isFarmEntry(cur)) {
-          const fr = farmStep(cur);
-          if (fr.done) { this.finish(cur); continue; }
-          if (fr.block) { this.block(cur, fr.block); return; }
-          if (fr.again) continue;
-          if (fr.wait > 20000 && Settings.farmMulti() && !this.focusId) {
-            const at = Queue.items.indexOf(cur);
-            const next = Queue.items.find((e, i) => i > at && e.status !== "done" && e.status !== "blocked" && !isFarmEntry(e) && (e.kind === "combat" || (e.kind === "gather" && e.skillId !== ASTRO_ID && (!cur.itemId || e.itemId !== cur.itemId))));
-            if (next) { this.focusId = next.id; this.farmFocus = true; this.farmWatch = cur.id; this.message = `${fr.note}. Working on "${next.label}" meanwhile`; Panel.render(); continue; }
-          }
-          this.message = fr.note;
-          Panel.render();
-          return;
-        }
-
-        if (cur.kind === "xp") {
-          const sk = skillById(cur.skillId);
-          if ((sk?.xp ?? 0) >= cur.targetXp) { this.finish(cur); continue; }
-          // the best method changes as levels go up or materials run out: switch when the current one stops
-          if (sk && sk.isActive && game.activeAction === sk) {
-            // levelled up since we picked the method: look again, a faster one may be open now
-            if (sk.level > (cur.lvl ?? sk.level)) { const rl = startEntry(cur); if (!rl.ok && !rl.transient) { this.block(cur, rl.reason); return; } }
-            Panel.render();
-            return;
-          }
-          if (game.activeAction && game.activeAction !== sk) { this.pause("Paused: something else started running."); return; }
-          const rx = startEntry(cur);
-          if (rx.ok) { Panel.render(); return; }
-          if (rx.transient) { this.message = rx.reason; Panel.render(); return; }
-          if (rx.noMaterials) {
-            const xpNow = Math.floor(sk?.xp ?? 0);
-            if (cur.matXp !== undefined && xpNow <= cur.matXp) cur.matStall = (cur.matStall ?? 0) + 1; else cur.matStall = 0;
-            cur.matXp = xpNow;
-            if (cur.matStall >= 2) { this.block(cur, "getting the materials didn't lead to any XP, so the plan stopped. Check the steps above it"); return; }
-            const mb = xpMaterialBatch(cur);
-            if (!mb.ok) { this.block(cur, mb.reason); return; }
-            Queue.insertBefore(cur.id, mb.entries);
-            continue;
-          }
-          this.block(cur, `${rx.reason} (${this.gained(cur).toLocaleString()} of ${Number(cur.targetXp).toLocaleString()} XP)`);
-          return;
-        }
-
-        if (cur.kind === "combat") {
-          const mon = game.monsters.getObjectByID(cur.monsterId);
-          if (cur.untilItem ? (have(itemById(cur.untilItem)) ?? 0) - (cur.startQty ?? 0) >= cur.qty : this.gained(cur) >= cur.targetKills) { this.finish(cur); continue; }
-          if (game.activeAction === game.combat && game.combat.selectedMonster === mon) { Panel.render(); return; }
-          if (game.activeAction && game.activeAction !== game.combat) { this.pause("Paused: something else started running."); return; }
-          if (cur.started) { this.block(cur, `the fight stopped (you may have died or run out of food). ${this.gained(cur).toLocaleString()} of ${Number(cur.targetKills).toLocaleString()} kills done`); return; }
-          const rc = startCombat(cur);
-          if (rc.ok) { cur.started = true; Panel.render(); return; }
-          this.block(cur, rc.reason);
-          return;
-        }
-
-        const owned = have(itemById(cur.itemId)) ?? 0;
-        if (cur.kind === "manual") {
-          if (owned >= cur.qty || cur.ack) { this.finish(cur); continue; }
-          cur.status = "waiting";
-          this.activeId = null;
-          this.activeSkillId = null;
-          Queue.save();
-          this.setState("paused", `Your turn: ${cur.label} x${Number(cur.qty).toLocaleString()} (you have ${owned.toLocaleString()}). Do it, then press Start.`);
-          return;
-        }
-
-        if (cur.untilLevel) {
-          const us = skillById(cur.untilSkill ?? cur.skillId);
-          if (us && (us.level >= cur.untilLevel || (cur.untilXp && (us.xp ?? 0) >= cur.untilXp))) { this.finish(cur); continue; }
-        }
-        if (owned - (cur.startQty ?? 0) >= cur.qty) { this.finish(cur); continue; }
-
-        const skill = skillById(cur.skillId);
-        if (cur.farm === "best" && skill) {
-          if (cur.lvl === undefined) cur.lvl = skill.level;
-          else if (skill.level > cur.lvl) {
-            cur.lvl = skill.level;
-            const it = itemById(cur.itemId), b = it && bestFarmSkill(it);
-            if (b && (b.a.id !== cur.actionId)) { const rl = startEntry(cur); if (!rl.ok && !rl.transient) { this.block(cur, rl.reason); return; } }
-          }
-        }
-        if (cur.constellation === "best" && skill?.id === ASTRO_ID) {
-          if (cur.lvl === undefined) cur.lvl = skill.level;
-          else if (skill.level > cur.lvl) {
-            cur.lvl = skill.level;
-            const it = itemById(cur.itemId), b = it && bestCon(it);
-            if (b && b.c.id !== cur.actionId) { const rl = startEntry(cur); if (!rl.ok && !rl.transient) { this.block(cur, rl.reason); return; } }
-          }
-        }
-        if (skill && skill.isActive && game.activeAction === skill) { Panel.render(); return; }
-        if (game.activeAction && game.activeAction !== skill) { this.pause("Paused: something else started running."); return; }
-
-        // nothing is running and the target isn't reached: the game stopped it (materials, etc.) so try again once
-        const r = startEntry(cur);
-        if (r.ok) { Panel.render(); return; }
-        if (r.transient) { this.message = r.reason; Panel.render(); return; }
-        if (r.noMaterials && cur.kind === "craft") {
-          const made = this.gained(cur);
-          if (cur.restockMade !== undefined && made <= cur.restockMade) cur.restockStall = (cur.restockStall ?? 0) + 1; else cur.restockStall = 0;
-          cur.restockMade = made;
-          const rs = restockCraft(cur);
-          if (rs.ok && cur.restockStall < 2) {
-            cur.restocks = (cur.restocks ?? 0) + 1;
-            Queue.insertBefore(cur.id, rs.entries);
-            this.message = `Short of materials for ${nm(itemById(cur.itemId))}: getting ${rs.remaining.toLocaleString()} more worth`;
-            continue;
-          }
-          this.block(cur, `${rs.ok ? "it keeps running out of materials without making more" : rs.reason} (${made.toLocaleString()} of ${Number(cur.qty).toLocaleString()} done)`);
-          return;
-        }
-        this.block(cur, `${r.reason} (${this.gained(cur).toLocaleString()} of ${Number(cur.qty).toLocaleString()} done)`);
-        return;
-      }
-    },
-  };
-
-  // XP goal with no materials in the bank: work out the steps that get them (mine the ore, chop the logs, craft the parts)
-  const levelForXp = (xp, cap = 120) => { let l = 1; while (l < cap && xpAt(l) < xp) l++; return l; };
-  const xpMaterialBatch = (e) => {
-    const skill = skillById(e.skillId);
-    if (!skill) return { ok: false, reason: "this skill wasn't found in your game version" };
-    if (isPlannable(skill)) {
-      const r = nextBatch({ id: e.id, skillId: skill.id, targetLevel: levelForXp(e.targetXp, levelCapFor(skill)), targetXp: e.targetXp, forced: "" });
-      return r;
-    }
-    const best = xpCandidates(skill, true)[0];
-    if (!best) return { ok: false, reason: `nothing to train at ${nm(skill)} level ${skill.level}` };
-    const a = best.a;
-    const per = (a.log ? [{ item: a.log, quantity: 1 }] : [...baseCosts(a), ...(options(a)[best.altIndex]?.costs ?? [])]).filter((k) => k?.item);
-    const goal = Math.min(e.targetXp, xpAt(Math.min(skill.level + 5, levelCapFor(skill))));
-    const actions = Math.max(1, Math.ceil((goal - (skill.xp ?? 0)) / Math.max(1, (a.baseExperience ?? 1) * succ(skill, a))));
-    const entries = [];
-    for (const k of per) {
-      const need = k.quantity * actions - (have(k.item) ?? 0);
-      if (need > 0) entries.push(...toEntries(buildRows(k.item, need, true)));
-    }
-    if (!entries.length) return { ok: false, reason: `couldn't work out how to get the materials for ${nm(a)}` };
-    if (entries.some((x) => x.kind === "manual")) return { ok: false, reason: `${nm(a)} needs something the queue can't get on its own` };
-    for (const x of entries) x.parent = e.id;
-    return { ok: true, entries, note: `Getting materials for ${nm(a)}` };
-  };
-  // A craft step ran out of ingredients before it made enough (Cooking burns food, Smithing and others can come up short):
-  // work out what is still missing and the steps that get it
-  const restockCraft = (e) => {
-    const skill = skillById(e.skillId), a = actionById(skill, e.actionId), item = itemById(e.itemId);
-    if (!skill || !a || !item) return { ok: false, reason: "this action wasn't found in your game version" };
-    const opt = options(a)[e.altIndex ?? 0] ?? { costs: [], mult: 1 };
-    const per = Math.max(1, (a.baseQuantity ?? 1) * opt.mult) * succ(skill, a);
-    const remaining = e.qty - Math.max(0, (have(item) ?? 0) - (e.startQty ?? 0));
-    const crafts = Math.max(1, Math.ceil(remaining / per));
-    const entries = [];
-    for (const k of [...baseCosts(a), ...opt.costs]) {
-      if (!k?.item) continue;
-      const need = k.quantity * crafts - (have(k.item) ?? 0);
-      if (need > 0) entries.push(...toEntries(buildRows(k.item, need, true)));
-    }
-    if (!entries.length) return { ok: false, reason: "not enough materials (or level too low)" };
-    if (entries.some((x) => x.kind === "manual")) return { ok: false, reason: `${nm(item)} needs something the queue can't get on its own` };
-    for (const x of entries) x.parent = e.parent ?? e.id;
-    return { ok: true, entries, remaining };
-  };
-  // ---------- XP planning (used by XP tasks) ----------
-  // An XP goal never farms blindly: every method is ranked
-  // by XP per hour of ALL the work it takes (gathering its materials included), and the plan only switches method when a
-  // clearly better one opens up. The queue plans one batch at a time, so it always uses your real level and bank.
-  const PLANNABLE = new Set([
-    "melvorD:Woodcutting", "melvorD:Mining", "melvorD:Fishing", "melvorD:Cooking", "melvorD:Smithing",
-    "melvorD:Fletching", "melvorD:Crafting", "melvorD:Runecrafting", "melvorD:Herblore",
-  ]);
-  const isPlannable = (s) => !!s && PLANNABLE.has(s.id);
-  const levelIn = (skill, lv) => (lv && lv.has(skill.id) ? lv.get(skill.id) : skill.level);
-  const xpAt = (l) => { try { return exp.level_to_xp(l); } catch (e) { return 0; } };
-  const levelCapFor = (s) => (s.level >= 99 ? 120 : 99);
-  const SWITCH_GAIN = 1.1; // keep the current method unless another is at least 10% faster, so plans don't split into tiny batches
-
-  // time (ms) to get n of an item from scratch with things the queue can do itself; Infinity if it can't
-  // also returns the XP those steps give in `skillId` (smelting bars trains Smithing too)
-  const acquire = (item, n, lv, skillId, seen = new Set(), depth = 0) => {
-    if (!(n > 0)) return { ms: 0, xp: 0 };
-    buildIndex();
-    const NO = { ms: Infinity, xp: 0 };
-    if (depth > 10 || seen.has(item.id)) return NO;
-    const c = idx.crafters.get(item.id)?.[0];
-    if (c) {
-      if (!isPlannable(c.skill) || (c.a.level ?? 1) > levelIn(c.skill, lv)) return NO;
-      const opt = options(c.a)[0];
-      const sr = succ(c.skill, c.a);
-      const per = Math.max(1, (c.a.baseQuantity ?? 1) * opt.mult) * sr;
-      const crafts = n / per; // attempts, not rounded up: this ranks methods by their steady rate
-      let ms = crafts * intervalMs(c.skill, c.a), xp = c.skill.id === skillId ? crafts * sr * (c.a.baseExperience ?? 0) : 0;
-      seen.add(item.id);
-      for (const k of [...baseCosts(c.a), ...opt.costs]) {
-        if (!k?.item) continue;
-        const r = acquire(k.item, k.quantity * crafts, lv, skillId, seen, depth + 1);
-        ms += r.ms; xp += r.xp;
-      }
-      seen.delete(item.id);
-      return { ms, xp };
-    }
-    if (isSeedItem(item)) { // seeds only come from monster drops: what you own is free, the rest is a fight
-      const hv = have(item) ?? 0;
-      if (hv >= n) return { ms: 0, xp: 0 };
-      const o = farmFights(item, n - hv).filter((x) => x.open && x.safety.safe && isFinite(x.ms)).sort((x, y) => x.score - y.score)[0];
-      return o ? { ms: o.ms, xp: 0 } : NO;
-    }
-    const g = idx.gatherers.get(item.id)?.[0];
-    if (g?.skill.id === FARMING_ID) { // a crop: you need the seeds already, and the wait is one growth time per round of your plots
-      const f = g.skill, plots = openPlots(f, g.a).length, cost = seedCostOf(f, g.a);
-      if (!plots || (g.a.level ?? 1) > levelIn(f, lv)) return NO;
-      const per = Math.max(1, g.a.baseQuantity ?? 1) * blendChance(f, g.a, plots), sd = acquire(g.a.seedCost.item, Math.min(plots, Math.ceil(n / per)) * cost, lv, skillId, seen, depth + 1);
-      if (!isFinite(sd.ms)) return NO;
-      return { ms: sd.ms + Math.ceil(n / (Math.max(1, g.a.baseQuantity ?? 1) * blendChance(f, g.a, plots) * plots)) * growMs(f, g.a), xp: 0 };
-    }
-    if (!g || !isPlannable(g.skill) || (g.a.level ?? 1) > levelIn(g.skill, lv)) return NO;
-    const acts = n / Math.max(1, g.a.baseQuantity ?? 1);
-    return { ms: acts * intervalMs(g.skill, g.a), xp: g.skill.id === skillId ? acts * (g.a.baseExperience ?? 0) : 0 };
-  };
-  // the same step the queue would really run for this product (first crafter / first gatherer)
-  const stepFor = (a) => {
-    buildIndex();
-    const c = a.product && idx.crafters.get(a.product.id)?.[0];
-    const g = a.product && idx.gatherers.get(a.product.id)?.[0];
-    return c ? (c.a === a ? { craft: true } : null) : g && g.a === a ? { craft: false } : null;
-  };
-  // XP methods open at this level, best first by XP per hour of everything they need
-  const methodCands = (skill, lv) => {
-    const out = [];
-    const L = levelIn(skill, lv);
-    for (const a of list(skill.actions)) {
-      if (a.realm && a.realm.id !== MELVOR_REALM) continue;
-      if ((a.level ?? 1) > L || !(a.baseExperience > 0) || !a.product) continue;
-      const st = stepFor(a);
-      if (!st) continue;
-      const opt = st.craft ? options(a)[0] : { costs: [], mult: 1 };
-      const sr = succ(skill, a);
-      const per = Math.max(1, (a.baseQuantity ?? 1) * opt.mult) * sr; // products per attempt
-      let ms = intervalMs(skill, a), xpPer = a.baseExperience * sr;
-      if (st.craft) for (const k of [...baseCosts(a), ...opt.costs]) if (k?.item) { const r = acquire(k.item, k.quantity, lv, skill.id); ms += r.ms; xpPer += r.xp; }
-      if (!isFinite(ms) || ms <= 0) continue;
-      const rate = (xpPer / ms) * 3600000;
-      out.push({ a, per, ms, xpPer, rate, score: rate });
-    }
-    return out.sort((x, y) => y.score - x.score);
-  };
-  const levelPlan = (skill, target, forcedId, fromLevel = skill.level, fromXp = skill.xp ?? 0, seed = null) => {
-    const sim = new Map(seed ?? []);
-    const batches = [];
-    let L = fromLevel, cur = null, blocked = null;
-    for (let guard = 0; L < target && guard < 140; guard++) {
-      sim.set(skill.id, L);
-      let cands = methodCands(skill, sim);
-      if (forcedId) cands = cands.filter((c) => c.a.id === forcedId);
-      if (!cands.length) { blocked = L; break; }
-      let pick = cands[0];
-      if (cur) { const same = cands.find((c) => c.a === cur.c.a); if (same && pick.score < same.score * SWITCH_GAIN) pick = same; }
-      if (!cur || cur.c.a !== pick.a) { cur = { c: pick, from: L, to: L }; batches.push(cur); }
-      L++;
-      cur.to = L;
-    }
-    let total = 0, xpPrev = fromXp;
-    for (const b of batches) {
-      const startXp = Math.max(xpPrev, xpAt(b.from));
-      b.xpGain = Math.max(0, xpAt(b.to) - startXp);
-      b.actions = Math.max(1, Math.ceil(b.xpGain / b.c.xpPer));
-      b.ms = b.actions * b.c.ms;
-      total += b.ms;
-      xpPrev = xpAt(b.to);
-    }
-    return { batches, totalMs: total, blocked };
-  };
-  // the next batch of real queue steps for an XP goal, planned from the player's level and bank right now
-  const nextBatch = (e) => {
-    const skill = skillById(e.skillId);
-    if (!skill) return { ok: false, reason: "this skill wasn't found in your game version" };
-    const plan = levelPlan(skill, e.targetLevel, e.forced);
-    if (!plan.batches.length) {
-      const fa = e.forced && actionById(skill, e.forced);
-      return { ok: false, reason: fa ? `${nm(fa)} can't be trained by the queue at level ${skill.level}` : `nothing at ${nm(skill)} level ${skill.level} can be trained by the queue on its own (it may need shop items or monster drops)` };
-    }
-    const b = plan.batches[0];
-    const goalXp = Math.min(xpAt(b.to), e.targetXp ?? Infinity);
-    const actions = Math.max(1, Math.ceil((goalXp - (skill.xp ?? 0)) / b.c.xpPer));
-    const item = b.c.a.product;
-    const rows = buildRows(item, Math.ceil(actions * b.c.per), true);
-    const entries = toEntries(rows);
-    const last = entries[entries.length - 1];
-    if (!last || last.itemId !== item.id) return { ok: false, reason: "couldn't work out the steps" };
-    if (entries.some((x) => x.kind === "manual")) return { ok: false, reason: `${nm(item)} needs something the queue can't get on its own` };
-    Object.assign(last, { untilLevel: b.to, untilSkill: skill.id, sellAll: !!e.sellMade });
-    if (e.targetXp !== undefined && e.targetXp <= xpAt(b.to)) last.untilXp = e.targetXp;
-    for (const x of entries) x.parent = e.id;
-    return { ok: true, entries, to: b.to, note: `${nm(b.c.a)} until level ${b.to} (about ${Math.round(b.c.rate).toLocaleString()} XP/h)` };
-  };
-  // ---------- floating panel ----------
-  const levelIssue = (e) => {
-    if (e.kind !== "craft" && e.kind !== "gather") return null;
-    const sk = skillById(e.skillId), a = sk && actionById(sk, e.actionId);
-    return a && (a.level ?? 1) > sk.level ? `Needs ${nm(sk)} level ${a.level} (you have ${sk.level})` : null;
-  };
-  const POS_KEY = "mbd-th-panel-pos";
-  const Panel = {
-    el: null,
-    last: "",
-    place(x, y) {
-      const el = this.el;
-      const w = el.offsetWidth || 350;
-      x = Math.min(Math.max(0, x), Math.max(0, window.innerWidth - w));
-      y = Math.min(Math.max(0, y), Math.max(0, window.innerHeight - 48));
-      Object.assign(el.style, { left: x + "px", top: y + "px", right: "auto", bottom: "auto", maxHeight: `min(70vh, ${Math.max(160, window.innerHeight - y - 8)}px)` });
-      return { x, y };
-    },
-    restorePos() {
-      try {
-        const p = JSON.parse(localStorage.getItem(POS_KEY) ?? "null");
-        if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) this.place(p.x, p.y);
-      } catch (e) { /* default position */ }
-    },
-    ensure() {
-      if (this.el) return this.el;
-      document.getElementById("mbd-queue-panel")?.remove();
-      const el = document.createElement("div");
-      el.id = "mbd-queue-panel";
-      el.style.cssText =
-        "position:fixed;right:68px;bottom:16px;width:350px;max-height:70vh;display:none;flex-direction:column;z-index:1050;" +
-        "background:rgba(28,32,41,.98);color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:10px;" +
-        "box-shadow:0 6px 24px rgba(0,0,0,.5);font-size:13px";
-      let drag = null;
-      el.addEventListener("pointerdown", (ev) => {
-        if (!ev.target.closest("[data-drag]") || ev.target.closest("[data-act]")) return;
-        const r = el.getBoundingClientRect();
-        drag = { dx: ev.clientX - r.left, dy: ev.clientY - r.top };
-        try { el.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
-        ev.preventDefault();
-      });
-      el.addEventListener("pointermove", (ev) => { if (drag) this.place(ev.clientX - drag.dx, ev.clientY - drag.dy); });
-      const endDrag = () => {
-        if (!drag) return;
-        drag = null;
-        const r = el.getBoundingClientRect();
-        try { localStorage.setItem(POS_KEY, JSON.stringify({ x: Math.round(r.left), y: Math.round(r.top) })); } catch (e) { /* ignore */ }
-      };
-      el.addEventListener("pointerup", endDrag);
-      el.addEventListener("pointercancel", endDrag);
-      el.addEventListener("click", (ev) => {
-        const a = ev.target.closest("[data-act]");
-        if (!a || a.disabled) return;
-        ev.preventDefault();
-        const act = a.dataset.act, id = a.dataset.id;
-        if (act === "close") this.close();
-        else if (act === "up") Queue.move(id, -1);
-        else if (act === "down") Queue.move(id, 1);
-        else if (act === "top") Queue.toTop(id);
-        else if (act === "remove") Queue.remove(id);
-        else if (act === "clear") Queue.clear();
-        else if (act === "cleardone") Queue.clearDone();
-        else if (act === "start") Runner.start();
-        else if (act === "pause") Runner.pause("Paused");
-        else if (act === "stop") Runner.stop();
-        else if (act === "first") Runner.doFirst(id);
-        else if (act === "autostart") { Settings.setAutoStart(!Settings.autoStart()); this.last = ""; this.render(); }
-        else if (act === "autosell") { Settings.set("autoSell", !Settings.autoSell()); this.last = ""; this.render(); }
-      });
-      window.addEventListener("resize", () => {
-        if (this.el && this.el.style.left) { const r = this.el.getBoundingClientRect(); this.place(r.left, r.top); }
-      });
-      document.body.appendChild(el);
-      this.el = el;
-      this.restorePos();
-      return el;
-    },
-    row(e) {
-      const isXp = e.kind === "xp";
-      const isCombat = e.kind === "combat";
-      const item = isXp ? skillById(e.skillId) : isCombat ? game.monsters.getObjectByID(e.monsterId) : itemById(e.itemId);
-      const manual = e.kind === "manual";
-      const done = e.status === "done";
-      const issue = !done && !manual ? levelIssue(e) : null;
-      const warn = e.status === "blocked" || e.status === "waiting" || !!issue;
-      const lead = done ? '<i class="fa fa-check text-success mr-2"></i>'
-        : e.status === "active" ? '<i class="fa fa-play text-success mr-2"></i>'
-        : warn ? '<i class="fa fa-exclamation-triangle text-warning mr-2"></i>'
-        : '<i class="fa fa-circle mr-2" style="opacity:.25;font-size:8px;vertical-align:middle"></i>';
-      const showProgress = !manual && !done && (isXp || isCombat || (e.startQty !== undefined && (e.status === "active" || e.status === "blocked" || Runner.gained(e) > 0)));
-      const amount = isCombat ? `<b>${Runner.gained(e).toLocaleString()} / ${Number(e.targetKills).toLocaleString()} kills</b>` : isXp ? `<b>${Runner.gained(e).toLocaleString()} / ${Number(e.targetXp).toLocaleString()} XP</b>` : showProgress ? `<b>${Runner.gained(e).toLocaleString()} / ${Number(e.qty).toLocaleString()}</b>` : `<b>x${Number(e.qty).toLocaleString()}</b>`;
-      const btn = (act, ic, title) =>
-        `<a data-act="${act}" data-id="${esc(e.id)}" class="pointer-enabled text-white-50 ml-2" title="${title}"><i class="fa ${ic}"></i></a>`;
-      const sub = done && e.sold ? `<br><small class="text-muted">${esc(e.sold)}</small>`
-        : e.reason ? `<br><small class="text-warning">${esc(e.reason)}</small>`
-        : issue ? `<br><small class="text-warning"><i class="fa fa-exclamation-triangle"></i> ${esc(issue)}</small>`
-        : isXp && e.status === "active" && e.method ? `<br><small class="text-muted">using ${esc(e.method)}</small>`
-        : manual && !done ? `<br><small class="text-muted">do this yourself${e.status === "waiting" ? " (waiting for you)" : ""}</small>` : "";
-      return (
-        `<div style="display:flex;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.07);${done ? "opacity:.5" : ""}" ${manual ? `title="${esc(e.note ?? "")}"` : ""}>` +
-        `<div style="flex:1;min-width:0">${lead}${icon(item)}<span class="${manual ? "text-muted font-italic" : ""}" style="${done ? "text-decoration:line-through" : ""}">${esc(e.label)}</span> ${amount}${Runner.focusId === e.id ? ' <span class="badge badge-success">first</span>' : ""}${sub}</div>` +
-        (done ? btn("remove", "fa-times", "Remove") :
-          `<a data-act="first" data-id="${esc(e.id)}" class="pointer-enabled text-success ml-2" title="Do this first (keeps its place in the list)"><i class="fa fa-play-circle"></i></a>` +
-          btn("top", "fa-angle-double-up", "Move to top") + btn("up", "fa-arrow-up", "Move up") + btn("down", "fa-arrow-down", "Move down") + btn("remove", "fa-times", "Remove")) +
-        `</div>`
-      );
-    },
-    render() {
-      if (!this.el) return;
-      const q = Queue.items;
-      const pending = q.filter((e) => e.status !== "done").length;
-      const running = Runner.state === "running";
-      const eta = Runner.eta();
-      const total = Runner.elapsed + eta.ms;
-      const pct = pending === 0 ? (q.length ? 100 : 0) : total > 0 ? Math.min(99, Math.round((Runner.elapsed / total) * 100)) : 0;
-      const cur = Runner.current();
-      const statusText = running ? `Running: ${cur ? cur.label : ""}` : Runner.state === "paused" ? (Runner.message || "Paused") : (Runner.message || (pending ? "Ready" : "Idle"));
-      const statusCls = Runner.state === "paused" ? "text-warning" : running ? "text-success" : "text-muted";
-      const etaText = pending === 0 ? (q.length ? "All done" : "Queue is empty")
-        : `${fmtDur(eta.ms)} left &middot; done around ${fmtClock(eta.ms)}` +
-          (eta.manual ? ` <span class="text-muted">(+ ${eta.manual} manual step${eta.manual === 1 ? "" : "s"})</span>` : "") +
-          (eta.unknown ? ` <span class="text-muted">(some steps can't be estimated)</span>` : "");
-      const b = (act, label, ic, cls, disabled) =>
-        `<button class="btn btn-sm ${cls}" data-act="${act}" ${disabled ? "disabled" : ""} style="padding:2px 10px"><i class="fa ${ic} mr-1"></i>${label}</button>`;
-      const asOn = Settings.autoStart(), slOn = Settings.autoSell();
-      const toggles =
-        `<a data-act="autostart" class="pointer-enabled mr-2" title="Auto-start: ${asOn ? "On" : "Off"}" style="font-size:19px;line-height:1;${asOn ? "color:#30c78d" : "opacity:.45"}"><i class="fa ${asOn ? "fa-toggle-on" : "fa-toggle-off"}"></i></a>` +
-        `<a data-act="autosell" class="pointer-enabled mr-2" title="Auto-sell extras: ${slOn ? "On" : "Off"}" style="font-size:15px;line-height:1;${slOn ? "color:#e5ae67" : "opacity:.45"}"><i class="fa fa-dollar-sign"></i></a>`;
-      const html =
-        `<div data-drag style="display:flex;align-items:center;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.12);cursor:move;user-select:none;touch-action:none" title="Drag to move">` +
-        `<i class="fa fa-grip-vertical mr-2" style="opacity:.4"></i>${toggles}<b style="flex:1">Action Queue</b><span class="text-muted mr-2">${pending} action${pending === 1 ? "" : "s"} left</span>` +
-        `<a data-act="close" class="pointer-enabled text-white" title="Close"><i class="fa fa-times"></i></a></div>` +
-        `<div data-list style="overflow:auto;padding:4px 10px;flex:1">` +
-        (q.length ? q.map((e) => this.row(e)).join("") : `<div class="text-muted py-3 text-center">Nothing queued yet.<br>Open a Township task's play button and choose "Add to queue" or "Add to top".</div>`) +
-        `</div>` +
-        `<div style="padding:10px;border-top:1px solid rgba(255,255,255,.12);text-align:center">` +
-        `<div style="position:relative;height:16px;border-radius:8px;background:rgba(255,255,255,.12);overflow:hidden">` +
-        `<div style="height:100%;width:${pct}%;background:#30c78d;transition:width .8s"></div>` +
-        `<span style="position:absolute;left:0;right:0;top:0;line-height:16px;font-size:11px;font-weight:600;text-shadow:0 0 3px rgba(0,0,0,.7)">${pct}%</span></div>` +
-        `<div style="margin-top:6px"><small class="${statusCls}">${esc(statusText)}</small></div>` +
-        `<div style="margin-bottom:8px"><small>${etaText}</small></div>` +
-        `<div style="display:flex;justify-content:center;gap:6px">` +
-        b("start", Runner.state === "paused" ? "Resume" : "Start", "fa-play", "btn-success", running || pending === 0) +
-        b("pause", "Pause", "fa-pause", "btn-warning", !running) +
-        b("stop", "Stop", "fa-stop", "btn-danger", Runner.state === "idle") +
-        `</div>` +
-        `<div style="display:flex;justify-content:center;gap:6px;margin-top:6px">` +
-        b("cleardone", "Clear Queue", "fa-check", "btn-secondary", !q.some((e) => e.status === "done")) +
-        b("clear", "Clear All", "fa-trash", "btn-outline-danger", q.length === 0) +
-        `</div></div>`;
-      if (html === this.last) return;
-      const prev = this.el.querySelector("[data-list]");
-      const top = prev ? prev.scrollTop : 0;
-      this.el.innerHTML = html;
-      this.last = html;
-      const next = this.el.querySelector("[data-list]");
-      if (next) next.scrollTop = top;
-    },
-    open() { this.ensure().style.display = "flex"; this.last = ""; this.render(); },
-    close() { if (this.el) this.el.style.display = "none"; },
-    toggle() { this.ensure(); this.el.style.display === "flex" ? this.close() : this.open(); },
-  };
-
-  // ---------- minibar button (bottom-right menu), sized like its neighbours ----------
-  const mountButton = () => {
-    const bar = document.getElementById("skill-footer-minibar");
-    if (!bar) return;
-    let b = document.getElementById("mbd-queue-btn");
-    if (!b) {
-      b = document.createElement("button");
-      b.className = "btn btn-sm btn-light";
-      b.id = "mbd-queue-btn";
-      b.title = "Action Queue";
-      b.style.position = "relative";
-      b.innerHTML =
-        '<i class="fa fa-list-ol text-dark" style="display:inline-block;width:24px;height:24px;line-height:24px;font-size:17px;text-align:center;vertical-align:middle"></i>' +
-        '<span class="mbd-count" style="display:none;position:absolute;top:-6px;right:-6px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:#17a2b8;color:#fff;font-size:10px;font-weight:600;line-height:17px;text-align:center"></span>';
-      b.addEventListener("click", () => { Panel.toggle(); b.blur(); });
-      bar.appendChild(b);
-      updateBadge();
-    }
-    const ref = [...bar.children].find((c) => c !== b && c.offsetWidth > 0);
-    if (ref) { b.style.width = ref.offsetWidth + "px"; b.style.height = ref.offsetHeight + "px"; }
-  };
-
   // ---------- goal -> popup ----------
-  // ---------- duplicates ----------
-  const entryKey = (e) => `${e.kind}|${e.itemId ?? e.monsterId ?? e.skillId ?? ""}|${e.actionId ?? e.forced ?? ""}|${e.targetXp ?? ""}`;
-  const queuedKeys = () => new Set(Queue.items.filter((x) => x.status !== "done").map(entryKey));
-  const dupHtml = (entries) => {
-    if (!entries?.length) return "";
-    const keys = queuedKeys();
-    const dups = entries.filter((e) => keys.has(entryKey(e)));
-    if (!dups.length) return "";
-    const all = dups.length === entries.length;
-    return `<div class="mbd-step"><div class="mbd-chips">${chip(`<i class="fa fa-exclamation-triangle"></i>&nbsp;${all ? "This task is already in your queue" : `${dups.length} of ${entries.length} steps are already in your queue`}`, "warn")}</div>` +
-      `<div class="mbd-chips">${dups.map((e) => chip(esc(e.label))).join("")}</div>` +
-      `<div class="mbd-note">${all ? "Adding it again does nothing." : "Those steps will be skipped, the rest are added."}</div></div>`;
-  };
   const tellPlayer = (msg) => {
     try { notifyPlayer(game.township ?? game.attack, msg, "info"); } catch (e) { console.log("[Township Task Helper]", msg); }
   };
-  const addUnique = (entries, top) => {
-    const seen = queuedKeys();
-    const fresh = [], skipped = [];
-    for (const e of entries) {
-      const k = entryKey(e);
-      if (seen.has(k)) skipped.push(e.label); else { seen.add(k); fresh.push(e); }
+  // steps go into Action Queue; it skips any that are already queued and says so
+  const dupHtml = (entries) => (entries?.length ? aq().queue.dupHtml(entries) : "");
+  const queueSteps = (entries, top) => {
+    const A = aq(), added = A.queue.add(entries, top, game.township);
+    A.panel.open();
+    if (added && A.settings.get("autoStart") && A.runner.state !== "running") A.runner.start();
+  };
+  // an XP task: Action Queue plans the fastest way there, gathering what the methods need, and re-plans as you level up
+  const levelForXp = (xp) => { const at = aq().skills.xpAt; let l = 1; while (l < 120 && at(l) < xp) l++; return l; };
+  const xpEntry = (skill, target) => ({ kind: "train", xpGoal: true, skillId: skill.id, targetXp: target, targetLevel: levelForXp(target), qty: target, label: `${nm(skill)}: reach ${num(target)} XP` });
+  const xpSection = (skill, target) => {
+    const A = aq(), now = skill.xp ?? 0, left = Math.max(0, target - now);
+    let html = `<div class="mbd-step"><div class="mbd-title">${icon(skill)}<b>${esc(nm(skill))}</b></div><div class="mbd-chips">` +
+      chip(`${num(Math.floor(now))} / ${num(target)} XP`) + (left > 0 ? chip(`${num(Math.ceil(left))} to go`) : chip('<i class="fa fa-check"></i> Done', "ok")) + `</div></div>`;
+    if (left <= 0) return html;
+    if (!A.skills.isTrainable(skill)) return html + `<div class="mbd-place">The queue can't train ${esc(nm(skill))} on its own.</div>`;
+    const plan = A.plan.trainPlan(skill, levelForXp(target)), b = plan.batches[0];
+    if (!b) {
+      const first = A.plan.goalFirst(skill), why = A.plan.blockedWhy(skill);
+      return html + (first ? `<div class="mbd-chips">${chip(esc(first), "ok")}</div>` : `<div class="mbd-place">${why ? `Nothing can be trained right now: ${esc(why)}.` : "Nothing found that the queue can train with your current levels."}</div>`);
     }
-    if (fresh.length) Queue.add(fresh, top);
-    if (skipped.length) tellPlayer(fresh.length ? `${skipped.length} step${skipped.length === 1 ? " was" : "s were"} already in the queue and skipped: ${skipped.join(", ")}` : "That task is already in your queue.");
-    return fresh.length;
+    const ms = Math.ceil(left / Math.max(1e-9, b.c.xpPer)) * b.c.ms;
+    html += `<div class="mbd-step"><div class="mbd-stepno">Fastest method right now</div><div class="mbd-title">${icon(b.c.a)}<b>${esc(b.c.a.name)}</b></div>` +
+      `<div class="mbd-chips">${chip(`Level ${b.c.a.level ?? 1}`)}${chip(`${num(Math.round(b.c.rate))} XP/hour`, "", "Counting the time to gather or make what it needs")}${chip(`About ${fmtDur(ms)}`, "ok", "Base speeds, gathering the materials included")}</div></div>`;
+    return html + `<div class="mbd-note">Queued, it gathers what the method needs and picks a better method as you level up, until you reach ${num(target)} XP.</div>`;
   };
 
   const killEntry = (goal, total) => {
     const m = goal.monster;
     const need = total ? goal.quantity : Math.max(0, goal.quantity - (goal._progress ?? 0));
     if (total ? game.stats.monsterKillCount(m) >= goal.quantity : need <= 0) return [];
-    return [{ kind: "combat", monsterId: m.id, targetKills: need, rel: !total, qty: need, label: `Defeat ${nm(m)}` }];
+    const left = total ? goal.quantity - game.stats.monsterKillCount(m) : need;
+    return [{ kind: "kill", monsterId: m.id, skillId: HITPOINTS, actionId: aq().fightId(m) ?? `fight:none:${m.id}`, qty: left, label: `Defeat ${nm(m)}` }];
   };
   const describeGoal = (goal) => {
     const type = goal?.constructor?.name;
@@ -1967,7 +828,7 @@ export function setup(ctx) {
         body: () => xpSection(goal.skill, goal.quantity),
         queue: () => {
           if ((goal.skill.xp ?? 0) >= goal.quantity) return [];
-          return [{ kind: "xp", skillId: goal.skill.id, targetXp: goal.quantity, qty: goal.quantity, label: `${nm(goal.skill)}: reach ${goal.quantity.toLocaleString()} XP` }];
+          return [xpEntry(goal.skill, goal.quantity)];
         },
       };
     }
@@ -2012,12 +873,8 @@ export function setup(ctx) {
       ev.preventDefault();
       ev.stopPropagation();
       try {
-        Astro.pick = "best"; Farm.pick = {}; Farm.risk = {};
-        const onQueue = info.queue && !info.blocked?.() ? (top) => {
-          const added = addUnique(info.queue(), top);
-          Panel.open();
-          if (added && Settings.autoStart() && Runner.state !== "running") Runner.start();
-        } : null;
+        Astro.pick = "best"; Farm.pick = {};
+        const onQueue = info.queue && !info.blocked?.() ? (top) => queueSteps(info.queue(), top) : null;
         fire(info.title, () => dupHtml(info.queue?.()) + info.body(), onQueue);
       } catch (e) { console.warn("[Township Task Helper]", e); }
     });
@@ -2065,6 +922,11 @@ export function setup(ctx) {
   };
 
   const install = () => {
+    if (!aq()) {
+      const msg = "Township Task Helper needs the Action Queue mod. Install Action Queue from the Mod Manager, then reload the game.";
+      try { SwalLocale.fire({ title: "Township Task Helper", html: msg, icon: "warning" }); } catch (e) { console.warn("[Township Task Helper]", msg); }
+      return;
+    }
     injectStyle();
     const proto = customElements.get("township-task-goal").prototype;
     const orig = proto.__mbdOrig ?? proto.setGoal;
@@ -2073,37 +935,20 @@ export function setup(ctx) {
       orig.call(this, goal);
       try { decorate(this, goal); } catch (e) { console.warn("[Township Task Helper]", e); }
     };
-    Queue.load();
-    mountButton();
-    clearInterval(window.__mbdThTimer);
-    window.__mbdThTimer = setInterval(mountButton, 2000); // the game can rebuild the menu; put our button back if it vanishes
-    clearInterval(window.__mbdThRunTimer);
-    window.__mbdThRunTimer = setInterval(() => { try { Runner.step(); } catch (e) { console.warn("[Township Task Helper] runner", e); } }, 1000);
+    // the queue can use what this mod knows about random drops when a recipe step runs short
+    aq().addSource((item, qty) => dropEntry(item, qty));
     refresh();
     window.townshipHelper = {
       version: VERSION,
       showItem: (id, qty = 1) => {
-        Astro.pick = "best"; Farm.pick = {}; Farm.risk = {};
+        Astro.pick = "best"; Farm.pick = {};
         const it = itemById(id);
         const miss = itemMissing(it, qty);
-        fire(`${qty} x ${esc(nm(it))}`, () => (itemMissing(it, qty).length ? missingHtml(itemMissing(it, qty)) : dupHtml(toEntries(buildRows(it, qty))) + itemSection(it, qty)), miss.length || !buildRows(it, qty).length ? null : (top) => {
-          const added = addUnique(toEntries(buildRows(it, qty)), top);
-          Panel.open();
-          if (added && Settings.autoStart() && Runner.state !== "running") Runner.start();
-        });
+        fire(`${qty} x ${esc(nm(it))}`, () => (itemMissing(it, qty).length ? missingHtml(itemMissing(it, qty)) : dupHtml(toEntries(buildRows(it, qty))) + itemSection(it, qty)), miss.length || !buildRows(it, qty).length ? null : (top) => queueSteps(toEntries(buildRows(it, qty)), top));
       },
       refresh,
-      queue: Queue,
-      panel: Panel,
-      runner: Runner,
-      settings: Settings,
-      // internals exposed for the test suite in tests/
-      _dev: {
-        itemMissing, areaMissing, missingHtml, reqText, buildRows, toEntries, itemSection, sourceHtml, buyHtml, buyFromShop, wikiUrl,
-        monsterSection, foodHtml, setsHtml, describeGoal, entryKey, addUnique, dupHtml, tellPlayer, xpCandidates, xpSection, estimateMs,
-        startAction, startEntry, killEntry, areaFor, obtainable, fire,
-        succ, acquire, stepFor, farmStep, blendChance, compostCover, compostNeed, applyCompost, farmReady, cropChance, bestCrop, isFarmEntry, openPlots, farmEstimate, xpMaterialBatch, restockCraft, levelPlan, methodCands, nextBatch, fmtDur, Astro, Farm, farmSkills, farmFights, farmPlan, fightSafety, monsterMaxHit, dropPerKill, isFarmItem, farmHtml, astroCons, astroOptions, bestCon, astroHtml, isAstroItem,
-      },
+      // internals for testing
+      _dev: { itemMissing, areaMissing, buildRows, toEntries, itemSection, sourceHtml, describeGoal, killEntry, xpEntry, xpSection, dropEntry, farmPlan, farmSkills, farmFights, fightSafety, astroOptions, bestCon, isFarmItem, isAstroItem, fire },
     };
     LOG("installed", VERSION);
   };
@@ -2112,12 +957,13 @@ export function setup(ctx) {
     typeof game !== "undefined" &&
     list(game?.township?.tasks?.tasks).length > 0 &&
     customElements.get("township-task-goal") &&
-    typeof SwalLocale !== "undefined" &&
-    document.getElementById("skill-footer-minibar");
+    typeof SwalLocale !== "undefined";
 
-  if (ready()) install();
+  // wait a moment past the game loading so Action Queue (a dependency) is set up first
+  const go = () => setTimeout(install, 1500);
+  if (ready()) go();
   else {
-    const timer = setInterval(() => { if (ready()) { clearInterval(timer); install(); } }, 500);
+    const timer = setInterval(() => { if (ready()) { clearInterval(timer); go(); } }, 500);
   }
 })();
 }
