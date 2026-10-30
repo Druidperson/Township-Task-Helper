@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.22.0
+- Township Task Helper is part of Action Queue now (2.0.0 and later). This version doesn't do anything except tell you to uninstall it, so it can't clash with the new Action Queue. The tests moved to the Action Queue repo.
+
 ## 0.21.1
 - Task Helper now waits a few seconds for Action Queue and Skill Trainer before saying one is missing. If Skill Trainer is too old (it needs 1.2.0 or later), the message now says so, with the version you have. The browser console also lists what it found, to help track down loading problems.
 
