@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.21.0";
+  const VERSION = "0.21.1";
   const LOG = (...a) => console.log("[Township Task Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => {
@@ -942,11 +942,26 @@ export function setup(ctx) {
     document.head.appendChild(st);
   };
 
+  // Skill Trainer 1.2.0 is the first version that holds the planner and lets other mods add sources
+  const verOk = (v, min) => { const a = String(v ?? "0").split(".").map(Number), b = min.split(".").map(Number); for (let i = 0; i < 3; i++) { if ((a[i] || 0) !== b[i]) return (a[i] || 0) > b[i]; } return true; };
+  const problems = () => {
+    const out = [];
+    if (!aq()) out.push("Action Queue");
+    if (!st()) out.push("Skill Trainer");
+    else if (!verOk(st().version, "1.2.0") || !st().plan || !st().addSource) out.push(`a newer Skill Trainer (you have ${st().version ?? "an old version"}, it needs 1.2.0 or later)`);
+    return out;
+  };
+  let tries = 0;
   const install = () => {
-    const missing = [!aq() && "Action Queue", !st() && "Skill Trainer"].filter(Boolean);
+    const missing = problems();
+    // the other mods can still be setting up, so give them a few seconds before complaining
+    if (missing.length && ++tries < 12) return void setTimeout(install, 1000);
     if (missing.length) {
-      const msg = `Township Task Helper needs the ${missing.join(" and ")} mod${missing.length > 1 ? "s" : ""}. Install ${missing.length > 1 ? "them" : "it"} from the Mod Manager, then reload the game.`;
-      try { SwalLocale.fire({ title: "Township Task Helper", html: msg, icon: "warning" }); } catch (e) { console.warn("[Township Task Helper]", msg); }
+      let found = {};
+      try { found = { actionQueue: aq()?.version ?? null, skillTrainer: st()?.version ?? null, modApi: Object.keys(mod?.api ?? {}), globals: Object.keys(window).filter((k) => /skillTrainer|actionQueue/i.test(k)) }; } catch (e) { /* ignore */ }
+      console.warn("[Township Task Helper] missing:", missing.join(", "), found);
+      const msg = `Township Task Helper needs ${missing.join(" and ")}. Install or update ${missing.length > 1 ? "them" : "it"} from the Mod Manager, then reload the game.`;
+      try { SwalLocale.fire({ title: "Township Task Helper", html: msg, icon: "warning" }); } catch (e) { /* console has it */ }
       return;
     }
     injectStyle();

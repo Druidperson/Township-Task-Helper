@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.21.1
+- Task Helper now waits a few seconds for Action Queue and Skill Trainer before saying one is missing. If Skill Trainer is too old (it needs 1.2.0 or later), the message now says so, with the version you have. The browser console also lists what it found, to help track down loading problems.
+
 ## 0.21.0
 - New: a switch in the mod settings called "Fights don't need auto eat". If you're playing while the queue runs and eat yourself, turn it on and fights count as safe without auto eat or food equipped. It still refuses a monster that can hit for half your HP or more.
 
