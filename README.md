@@ -4,6 +4,8 @@
 
 Township tasks take a lot of planning. Which ore, how many bars, which arrows, which monster, what level. Township Task Helper plans every task for you, then hands it to the Action Queue so you don't have to sit there and grind.
 
+Township Task Helper needs the Action Queue mod, which runs the steps. Install both.
+
 ## Getting started
 
 Open Township and go to your task list. Every requirement has a green play button next to it. Click one and you're in.
@@ -18,11 +20,11 @@ The Train a skill window now lives in its own mod, Skill Trainer, so you can use
 
 ## Stardust, handled
 
-Stardust and Golden Stardust drop while you study a constellation in Astrology. When a task needs them, the plan takes you there and asks which constellation you want to study, since each one boosts different skills. Pick the one you care about, or let it use the best XP per hour and switch up as you level.
+Stardust and Golden Stardust drop while you study a constellation in Astrology. When a task needs them, the plan takes you there and asks which constellation you want to study, since each one boosts different skills. Pick the one you care about, or let it use the best XP per hour.
 
 ## Drops, sorted out
 
-Some items only drop. Bird Nest comes from Woodcutting, Bones from monsters. When a task needs one, the plan picks the quickest way: a skill you can train while it drops, or a fight that's safe for your health and food. It checks your Slayer task too, and offers it when that monster drops what you need. You can always pick a different tree or monster yourself.
+Some items only drop. Bird Nest comes from Woodcutting, Bones from monsters. When a task needs one, the plan picks the quickest way: a skill you can train while it drops, or a fight that's safe for your health and food. The queue only runs fights that are safe while you're away. It checks your Slayer task too, and offers it when that monster drops what you need. You can always pick a different tree or monster yourself.
 
 ## Walk into fights ready
 
@@ -32,13 +34,13 @@ Monster tasks show how the enemy attacks, what it's weak to and where to find it
 
 Add a plan to the Action Queue and walk away. It gathers, crafts, trains and fights, one step after another, and pauses with a note if something needs you. Start it before bed and wake up to finished tasks.
 
+Skill Trainer adds its steps to the same queue, so the two work side by side.
+
 ## Small things that save time
 
-- It picks the best XP method you can actually use
-- Extras it makes along the way get sold for you
+- XP tasks pick the best method you can actually use and switch as you level up
 - It won't queue the same step twice
 - If it can't find where an item comes from, it points you to the wiki
-- Turn on auto-start and the queue begins as soon as you add something
 
 ## Bugs and ideas
 

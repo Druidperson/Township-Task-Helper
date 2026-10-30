@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.19.0
+- Township Task Helper now needs the Action Queue mod. The queue, its panel and settings moved there, so Township Task Helper and Skill Trainer share one queue instead of each having their own. Install both.
+- XP tasks use the same planner as Skill Trainer, so they work for more skills, gather what a method needs first and switch methods as you level up.
+- Fights only run when they're safe while you're away, for drops and for monster tasks. A fight that isn't safe stops with the reason.
+- Compost is no longer bought on its own. Farming uses compost you own, and the queue asks you before buying any.
+- An Astrology step keeps the constellation you picked and no longer switches as you level up.
+- Saved queues from 0.18.0 don't carry over.
+
 ## 0.18.0
 - New: while a Farming step waits for its crops, the queue now works on the next gathering or fighting step and comes back when a crop is ready. Crafting and training steps are never started early, since they might need the crop. You can turn this off in the mod settings with "Work on other steps while crops grow".
 - The tests are back, rebuilt for everything the mod does now, including Farming, compost and seed fights.
