@@ -4,7 +4,7 @@
 
 Township tasks take a lot of planning. Which ore, how many bars, which arrows, which monster, what level. Township Task Helper plans every task for you, then hands it to the Action Queue so you don't have to sit there and grind.
 
-Township Task Helper needs the Action Queue mod, which runs the steps. Install both.
+Township Task Helper needs two other mods: Action Queue, where the steps go, and Skill Trainer, which knows how to train each skill. Install all three.
 
 ## Getting started
 

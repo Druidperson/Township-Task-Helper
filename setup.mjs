@@ -3,7 +3,7 @@ export function setup(ctx) {
 (() => {
   "use strict";
 
-  const VERSION = "0.19.0";
+  const VERSION = "0.20.0";
   const LOG = (...a) => console.log("[Township Task Helper]", ...a);
   const list = (r) => r?.allObjects ?? (r?.registeredObjects ? [...r.registeredObjects.values()] : []);
   const nm = (o) => {
@@ -20,9 +20,10 @@ export function setup(ctx) {
   const have = (item) => {
     try { const q = game.bank.getQty(item); return Number.isFinite(q) ? q : null; } catch (e) { return null; }
   };
-  // The queue, its panel and the code that runs steps in the game live in the Action Queue mod, which this mod needs.
-  // Township Task Helper works out what a task takes and adds the steps there.
+  // This mod needs two others: Action Queue (the queue and its panel, where the steps go) and Skill Trainer (which knows how
+  // to train each skill and run those steps). Township Task Helper works out what a task takes and adds the steps.
   const aq = () => (typeof mod !== "undefined" && mod?.api?.actionQueue) || window.actionQueue;
+  const st = () => (typeof mod !== "undefined" && mod?.api?.skillTrainer) || window.skillTrainer;
   const MELVOR_REALM = "melvorD:Melvor", HITPOINTS = "melvorD:Hitpoints";
   const intervalMs = (skill, a) =>
     a.baseInterval ?? (a.baseMinInterval !== undefined && a.baseMaxInterval !== undefined ? (a.baseMinInterval + a.baseMaxInterval) / 2 : skill.baseInterval) ?? 3000;
@@ -567,7 +568,7 @@ export function setup(ctx) {
       if (ch) return { kind: "gather", skillId: ASTRO_ID, actionId: ch.c.id, unitMs: ch.perHr > 0 ? 3600000 / ch.perHr : undefined, label: `${nm(astroSkill())}: study ${nm(ch.c)} for ${nm(item)}` };
     }
     if (!isFarmItem(item)) return null;
-    const o = farmPlan(item, false, qty).opt, fid = o?.type === "fight" && aq()?.fightId(o.m);
+    const o = farmPlan(item, false, qty).opt, fid = o?.type === "fight" && st()?.fightId(o.m);
     if (o?.type === "skill") return { kind: "gather", skillId: o.skill.id, actionId: o.a.id, unitMs: o.perHr > 0 ? 3600000 / o.perHr : undefined, label: `${nm(o.skill)}: ${nm(o.a)} for ${nm(item)}` };
     if (fid && o.safety.safe) return { kind: "gather", skillId: HITPOINTS, actionId: fid, unitMs: isFinite(o.ms) ? o.ms / Math.max(1, qty) : undefined, label: `Fight ${nm(o.m)} for ${nm(item)}` };
     return null;
@@ -786,17 +787,17 @@ export function setup(ctx) {
     if (added && A.settings.get("autoStart") && A.runner.state !== "running") A.runner.start();
   };
   // an XP task: Action Queue plans the fastest way there, gathering what the methods need, and re-plans as you level up
-  const levelForXp = (xp) => { const at = aq().skills.xpAt; let l = 1; while (l < 120 && at(l) < xp) l++; return l; };
+  const levelForXp = (xp) => { const at = st().skills.xpAt; let l = 1; while (l < 120 && at(l) < xp) l++; return l; };
   const xpEntry = (skill, target) => ({ kind: "train", xpGoal: true, skillId: skill.id, targetXp: target, targetLevel: levelForXp(target), qty: target, label: `${nm(skill)}: reach ${num(target)} XP` });
   const xpSection = (skill, target) => {
-    const A = aq(), now = skill.xp ?? 0, left = Math.max(0, target - now);
+    const S = st(), now = skill.xp ?? 0, left = Math.max(0, target - now);
     let html = `<div class="mbd-step"><div class="mbd-title">${icon(skill)}<b>${esc(nm(skill))}</b></div><div class="mbd-chips">` +
       chip(`${num(Math.floor(now))} / ${num(target)} XP`) + (left > 0 ? chip(`${num(Math.ceil(left))} to go`) : chip('<i class="fa fa-check"></i> Done', "ok")) + `</div></div>`;
     if (left <= 0) return html;
-    if (!A.skills.isTrainable(skill)) return html + `<div class="mbd-place">The queue can't train ${esc(nm(skill))} on its own.</div>`;
-    const plan = A.plan.trainPlan(skill, levelForXp(target)), b = plan.batches[0];
+    if (!S.skills.isTrainable(skill)) return html + `<div class="mbd-place">The queue can't train ${esc(nm(skill))} on its own.</div>`;
+    const plan = S.plan.trainPlan(skill, levelForXp(target)), b = plan.batches[0];
     if (!b) {
-      const first = A.plan.goalFirst(skill), why = A.plan.blockedWhy(skill);
+      const first = S.plan.goalFirst(skill), why = S.plan.blockedWhy(skill);
       return html + (first ? `<div class="mbd-chips">${chip(esc(first), "ok")}</div>` : `<div class="mbd-place">${why ? `Nothing can be trained right now: ${esc(why)}.` : "Nothing found that the queue can train with your current levels."}</div>`);
     }
     const ms = Math.ceil(left / Math.max(1e-9, b.c.xpPer)) * b.c.ms;
@@ -810,7 +811,7 @@ export function setup(ctx) {
     const need = total ? goal.quantity : Math.max(0, goal.quantity - (goal._progress ?? 0));
     if (total ? game.stats.monsterKillCount(m) >= goal.quantity : need <= 0) return [];
     const left = total ? goal.quantity - game.stats.monsterKillCount(m) : need;
-    return [{ kind: "kill", monsterId: m.id, skillId: HITPOINTS, actionId: aq().fightId(m) ?? `fight:none:${m.id}`, qty: left, label: `Defeat ${nm(m)}` }];
+    return [{ kind: "kill", monsterId: m.id, skillId: HITPOINTS, actionId: st().fightId(m) ?? `fight:none:${m.id}`, qty: left, label: `Defeat ${nm(m)}` }];
   };
   const describeGoal = (goal) => {
     const type = goal?.constructor?.name;
@@ -922,8 +923,9 @@ export function setup(ctx) {
   };
 
   const install = () => {
-    if (!aq()) {
-      const msg = "Township Task Helper needs the Action Queue mod. Install Action Queue from the Mod Manager, then reload the game.";
+    const missing = [!aq() && "Action Queue", !st() && "Skill Trainer"].filter(Boolean);
+    if (missing.length) {
+      const msg = `Township Task Helper needs the ${missing.join(" and ")} mod${missing.length > 1 ? "s" : ""}. Install ${missing.length > 1 ? "them" : "it"} from the Mod Manager, then reload the game.`;
       try { SwalLocale.fire({ title: "Township Task Helper", html: msg, icon: "warning" }); } catch (e) { console.warn("[Township Task Helper]", msg); }
       return;
     }
@@ -936,7 +938,7 @@ export function setup(ctx) {
       try { decorate(this, goal); } catch (e) { console.warn("[Township Task Helper]", e); }
     };
     // the queue can use what this mod knows about random drops when a recipe step runs short
-    aq().addSource((item, qty) => dropEntry(item, qty));
+    st().addSource((item, qty) => dropEntry(item, qty));
     refresh();
     window.townshipHelper = {
       version: VERSION,

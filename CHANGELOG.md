@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.20.0
+- Township Task Helper now needs both Action Queue and Skill Trainer. Action Queue holds the queue, and Skill Trainer knows how to train each skill and run the steps. Install all three.
+
 ## 0.19.0
 - Township Task Helper now needs the Action Queue mod. The queue, its panel and settings moved there, so Township Task Helper and Skill Trainer share one queue instead of each having their own. Install both.
 - XP tasks use the same planner as Skill Trainer, so they work for more skills, gather what a method needs first and switch methods as you level up.
